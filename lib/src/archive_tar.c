@@ -849,18 +849,10 @@ long d99_tar_extract(d99_tarr *t, const d99_tar_extract_opts *o)
         }
 
         if (m.typeflag == '2') {  /* symlink */
-            char target[4096];
             int dfd;
-            long tl;
-            tl = tar_normalize(m.linkname, target, sizeof target);
-            if (tl < 0) {
-                d99_warn("rejecting unsafe symlink target '%s'", m.linkname);
+            if (m.linkname[0] == '\0') {
+                d99_warn("empty symlink target for '%s'", use);
                 d99_tar_skip(t);
-                if (!o->keep_going) {
-                    if (pc.fd >= 0) close(pc.fd);
-                    close(rootfd);
-                    return -1;
-                }
                 continue;
             }
             if (open_parent(&pc, rootfd, use, base, sizeof base, &dfd) != 0)
