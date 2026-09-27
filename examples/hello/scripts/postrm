@@ -1,0 +1,10 @@
+#!/bin/sh
+case "$1" in
+    purge)
+        # conffile variants are removed by d99-inst; clean up anything extra
+        rm -f "$DPKG_ROOT/etc/hello-d99/hello.local" 2>/dev/null || true
+        rmdir "$DPKG_ROOT/etc/hello-d99" 2>/dev/null || true
+        ;;
+    remove|upgrade|disappear) ;;
+esac
+exit 0

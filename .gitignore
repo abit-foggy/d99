@@ -1,0 +1,17 @@
+# build products (tools in output/bin, test binaries in output/tests)
+output/
+bin/
+
+# compiled objects and libraries
+*.o
+*.a
+
+# package artifacts
+*.deb
+
+# d99 atomic-write temp files
+*.d99tmp*
+
+# editor / OS cruft
+*.swp
+*~

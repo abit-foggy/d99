@@ -1,0 +1,13 @@
+#!/bin/sh
+# d99 maintainer script example; standard dpkg argument conventions.
+case "$1" in
+    configure)
+        echo "hello-d99 postinst: configured (old version: ${2:-none})"
+        ;;
+    triggered)
+        echo "hello-d99 postinst: trigger '$2' fired"
+        ;;
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+esac
+exit 0

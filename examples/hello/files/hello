@@ -1,0 +1,2 @@
+#!/bin/sh
+echo "Hello from d99! (config: $(cat "$DPKG_ROOT/etc/hello-d99/hello.conf" 2>/dev/null))"
