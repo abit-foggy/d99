@@ -685,12 +685,14 @@ static int open_parent(pdir_cache *pc, int rootfd, const char *path, char *base,
             }
             if (*comp) {
                 fd = openat(cur, comp, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+                if (fd < 0 && (errno == ELOOP || errno == ENOTDIR))
+                    fd = openat(cur, comp, O_RDONLY | O_DIRECTORY);
                 if (fd < 0 && errno == ENOENT) {
                     if (mkdirat(cur, comp, 0755) != 0 && errno != EEXIST) {
                         close(cur);
                         return -1;
                     }
-                    fd = openat(cur, comp, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+                    fd = openat(cur, comp, O_RDONLY | O_DIRECTORY);
                 }
                 close(cur);
                 if (fd < 0)
@@ -800,7 +802,7 @@ long d99_tar_extract(d99_tarr *t, const d99_tar_extract_opts *o)
         if (m.typeflag == '0' || m.typeflag == '7') {
             int dfd, fd;
             if (open_parent(&pc, rootfd, use, base, sizeof base, &dfd) != 0)
-                goto member_err;
+                goto member_err_with_errno;
             fd = openat(dfd, base, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW,
                         (mode_t)(m.mode & 07777) ? (mode_t)(m.mode & 07777) : 0644);
             if (fd < 0 && errno == ELOOP) {
@@ -810,7 +812,7 @@ long d99_tar_extract(d99_tarr *t, const d99_tar_extract_opts *o)
             }
             close(dfd);
             if (fd < 0)
-                goto member_err;
+                goto member_err_with_errno;
             posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL);
             {
                 unsigned char buf[131072];
@@ -856,7 +858,7 @@ long d99_tar_extract(d99_tarr *t, const d99_tar_extract_opts *o)
                 continue;
             }
             if (open_parent(&pc, rootfd, use, base, sizeof base, &dfd) != 0)
-                goto member_err;
+                goto member_err_with_errno;
             unlinkat(dfd, base, 0);
             if (symlinkat(m.linkname, dfd, base) != 0) {
                 close(dfd);
@@ -883,10 +885,10 @@ long d99_tar_extract(d99_tarr *t, const d99_tar_extract_opts *o)
                 continue;
             }
             if (open_parent(&pc, rootfd, target, tbase, sizeof tbase, &tfd) != 0)
-                goto member_err;
+                goto member_err_with_errno;
             if (open_parent(&pc, rootfd, use, base, sizeof base, &dfd) != 0) {
                 close(tfd);
-                goto member_err;
+                goto member_err_with_errno;
             }
             unlinkat(dfd, base, 0);
             if (linkat(tfd, tbase, dfd, base, 0) != 0) {
@@ -905,7 +907,7 @@ long d99_tar_extract(d99_tarr *t, const d99_tar_extract_opts *o)
         if (m.typeflag == '6') {  /* FIFO */
             int dfd;
             if (open_parent(&pc, rootfd, use, base, sizeof base, &dfd) != 0)
-                goto member_err;
+                goto member_err_with_errno;
             unlinkat(dfd, base, 0);
             if (mknodat(dfd, base, S_IFIFO | (mode_t)(m.mode & 07777), 0) != 0) {
                 close(dfd);
@@ -925,7 +927,6 @@ long d99_tar_extract(d99_tarr *t, const d99_tar_extract_opts *o)
 
 member_err_with_errno:
         d99_warn("%s: %s", use, strerror(errno));
-member_err:
         if (!o->keep_going) {
             if (pc.fd >= 0) close(pc.fd);
             close(rootfd);

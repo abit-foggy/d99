@@ -112,6 +112,8 @@ static char *infer_base_uri_from_path(const char *path)
         return d99_xstrdup("http://packages.linuxmint.com");
     if (strstr(base, "adityagarg8.github.io_t2-ubuntu-repo"))
         return d99_xstrdup("https://adityagarg8.github.io/t2-ubuntu-repo");
+    if (strstr(base, "repo.waydro.id"))
+        return d99_xstrdup("https://repo.waydro.id");
     return d99_xstrdup("");
 }
 
@@ -582,6 +584,17 @@ int cand_satisfies(d99_cand *c, const char *name, int op, const char *ver)
     return 0;
 }
 
+static int cand_arch_ok(const d99_cand *c)
+{
+    const char *host;
+    if (!c || !c->arch || !*c->arch)
+        return 1;
+    if (strcmp(c->arch, "all") == 0)
+        return 1;
+    host = d99_host_arch();
+    return (host && strcmp(c->arch, host) == 0);
+}
+
 d99_cand *repo_find(d99_repo *r, const char *name, int op, const char *ver)
 {
     d99_cand *best = NULL;
@@ -596,7 +609,7 @@ d99_cand *repo_find(d99_repo *r, const char *name, int op, const char *ver)
             const char *cname = strings + recs[idx].name_off;
             if (strcmp(cname, name) == 0) {
                 d99_cand *c = repo_get(r, idx);
-                if (c && (op == D99_DEP_NONE || !ver ||
+                if (c && cand_arch_ok(c) && (op == D99_DEP_NONE || !ver ||
                           d99_verrel(d99_vercmp(c->version, ver), op))) {
                     if (!best || d99_vercmp(c->version, best->version) > 0)
                         best = c;
@@ -610,7 +623,7 @@ d99_cand *repo_find(d99_repo *r, const char *name, int op, const char *ver)
         size_t i;
         for (i = 0; i < r->n; i++) {
             d99_cand *c = repo_get(r, i);
-            if (!c || strcmp(c->name, name) != 0)
+            if (!c || strcmp(c->name, name) != 0 || !cand_arch_ok(c))
                 continue;
             if (op != D99_DEP_NONE && ver) {
                 if (!d99_verrel(d99_vercmp(c->version, ver), op))
@@ -630,7 +643,7 @@ d99_cand *repo_find(d99_repo *r, const char *name, int op, const char *ver)
             if (!recs[i].provides_off)
                 continue;
             d99_cand *c = repo_get(r, i);
-            if (!c)
+            if (!c || !cand_arch_ok(c))
                 continue;
             if (cand_satisfies(c, name, op, ver)) {
                 if (!best || d99_vercmp(c->version, best->version) > 0)

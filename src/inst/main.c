@@ -798,6 +798,32 @@ static void usage(void)
 enum action { A_NONE, A_INSTALL, A_UNPACK, A_CONFIGURE, A_REMOVE, A_PURGE,
               A_TRIGGERS_ONLY, A_ADD_TRIGGER, A_PRINT_ARCH };
 
+static void delegate_to_query(char *const argv[])
+{
+    if (d99_fallback_exists(argv[0]))
+        d99_fallback_exec(argv[0], argv);
+    if (d99_file_exists("/usr/local/bin/d99-query"))
+        execv("/usr/local/bin/d99-query", argv);
+    if (d99_file_exists("/usr/bin/dpkg-query"))
+        execv("/usr/bin/dpkg-query", argv);
+    execvp("d99-query", argv);
+    execvp("dpkg-query", argv);
+    d99_die("cannot execute d99-query for query action");
+}
+
+static void delegate_to_deb(char *const argv[])
+{
+    if (d99_fallback_exists(argv[0]))
+        d99_fallback_exec(argv[0], argv);
+    if (d99_file_exists("/usr/local/bin/d99-deb"))
+        execv("/usr/local/bin/d99-deb", argv);
+    if (d99_file_exists("/usr/bin/dpkg-deb"))
+        execv("/usr/bin/dpkg-deb", argv);
+    execvp("d99-deb", argv);
+    execvp("dpkg-deb", argv);
+    d99_die("cannot execute d99-deb for deb action");
+}
+
 int main(int argc, char **argv)
 {
     struct d99_ctx c;
@@ -869,12 +895,24 @@ int main(int argc, char **argv)
                 } else if (strcmp(a, "--help") == 0) {
                     usage();
                     return 0;
+                } else if (strcmp(a, "--listfiles") == 0 ||
+                           strcmp(a, "--status") == 0 ||
+                           strcmp(a, "--list") == 0 ||
+                           strcmp(a, "--search") == 0 ||
+                           strcmp(a, "--print-avail") == 0 ||
+                           strcmp(a, "--show") == 0) {
+                    delegate_to_query(argv);
+                } else if (strcmp(a, "--contents") == 0 ||
+                           strcmp(a, "--info") == 0 ||
+                           strcmp(a, "--extract") == 0 ||
+                           strcmp(a, "--vextract") == 0 ||
+                           strcmp(a, "--control") == 0 ||
+                           strcmp(a, "--build") == 0) {
+                    delegate_to_deb(argv);
                 } else if (strcmp(a, "--dry-run") == 0 ||
                            strcmp(a, "--verify") == 0 ||
                            strcmp(a, "--audit") == 0 ||
                            strcmp(a, "--yet-to-unpack") == 0 ||
-                           strcmp(a, "--list") == 0 ||
-                           strcmp(a, "--search") == 0 ||
                            strcmp(a, "--update-avail") == 0 ||
                            strcmp(a, "--merge-avail") == 0) {
                     /* recognized upstream actions we deliberately delegate */
@@ -891,6 +929,22 @@ int main(int argc, char **argv)
                     case 'P': act = A_PURGE; break;
                     case 'E': skip_same = 1; break;
                     case 'v': d99_set_verbose(1); break;
+                    case 'L':
+                    case 'l':
+                    case 's':
+                    case 'S':
+                    case 'p':
+                    case 'W':
+                        delegate_to_query(argv);
+                        break;
+                    case 'c':
+                    case 'I':
+                    case 'x':
+                    case 'X':
+                    case 'e':
+                    case 'b':
+                        delegate_to_deb(argv);
+                        break;
                     default:
                         d99_fallback_or_die(argv[0], argv);
                     }

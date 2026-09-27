@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #define FETCH_MAX_REDIRECTS 8
@@ -294,7 +295,7 @@ static int http_get(const char *url, const char *dest, int depth, int quiet)
         char *next = resolve_url(url, location);
         fclose(in);
         free(location);
-        rc = http_get(next, dest, depth + 1, quiet);
+        rc = d99_fetch(next, dest, quiet);
         free(next);
         return rc;
     }
@@ -314,6 +315,50 @@ static int http_get(const char *url, const char *dest, int depth, int quiet)
     return rc;
 }
 
+static int fetch_https(const char *url, const char *dest, int quiet)
+{
+    char tmpl[4096];
+    char *dir = d99_dirname_dup(dest);
+    int fd;
+    pid_t pid;
+    int status;
+
+    snprintf(tmpl, sizeof tmpl, "%s/.d99fetch.XXXXXX", dir ? dir : ".");
+    free(dir);
+    fd = mkstemp(tmpl);
+    if (fd < 0)
+        return -1;
+    close(fd);
+
+    pid = fork();
+    if (pid < 0) {
+        unlink(tmpl);
+        return -1;
+    }
+    if (pid == 0) {
+        if (quiet) {
+            int devnull = open("/dev/null", O_WRONLY);
+            if (devnull >= 0) {
+                dup2(devnull, STDOUT_FILENO);
+                dup2(devnull, STDERR_FILENO);
+                close(devnull);
+            }
+        }
+        execlp("curl", "curl", "-fsSL", "--retry", "2", "-o", tmpl, url, (char *)NULL);
+        execlp("wget", "wget", "-q", "-O", tmpl, url, (char *)NULL);
+        _exit(127);
+    }
+    if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        unlink(tmpl);
+        return -1;
+    }
+    if (rename(tmpl, dest) != 0) {
+        unlink(tmpl);
+        return -1;
+    }
+    return 0;
+}
+
 int d99_fetch(const char *url, const char *dest, int quiet)
 {
     if (strncmp(url, "file://", 7) == 0) {
@@ -330,8 +375,8 @@ int d99_fetch(const char *url, const char *dest, int quiet)
     }
     if (strncmp(url, "http://", 7) == 0)
         return http_get(url, dest, 0, quiet);
-    fprintf(stderr, "d99-solve: unsupported URL scheme in '%s'\n"
-            "d99-solve: client speaks http:// and file:// "
-            "only (no TLS dependency)\n", url);
+    if (strncmp(url, "https://", 8) == 0)
+        return fetch_https(url, dest, quiet);
+    fprintf(stderr, "d99-solve: unsupported URL scheme in '%s'\n", url);
     return -1;
 }

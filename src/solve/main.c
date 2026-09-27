@@ -61,16 +61,25 @@ static void parse_sources_file(const char *path, source_entry **v, size_t *n,
             if (tok && strcmp(tok, "deb") == 0) {
                 tok = strtok_r(NULL, " \t", &save);
                 if (tok && tok[0] == '[') {
-                    while (save && *save && save[-1] != ']')
+                    while (tok && !strchr(tok, ']'))
                         tok = strtok_r(NULL, " \t", &save);
-                    tok = strtok_r(NULL, " \t", &save);
+                    if (tok)
+                        tok = strtok_r(NULL, " \t", &save);
                 }
                 if (tok && (strncmp(tok, "http://", 7) == 0 ||
+                            strncmp(tok, "https://", 8) == 0 ||
                             strncmp(tok, "file://", 7) == 0)) {
                     source_entry e;
+                    size_t ulen;
                     memset(&e, 0, sizeof e);
                     d99_sv_init(&e.comps);
                     e.uri = d99_xstrdup(tok);
+                    ulen = strlen(e.uri);
+                    while (ulen > 0 && e.uri[ulen - 1] == '/') {
+                        if (ulen >= 3 && e.uri[ulen - 2] == '/' && e.uri[ulen - 3] == ':')
+                            break;
+                        e.uri[--ulen] = '\0';
+                    }
                     tok = strtok_r(NULL, " \t", &save);
                     if (tok)
                         e.suite = d99_xstrdup(tok);
@@ -205,6 +214,14 @@ static int cmd_update(paths *p, const char *arch)
                 if (fetch_index(base, e->uri, p->lists_dir, mf) == 0)
                     any = 1;
                 free(base);
+
+                if (strcmp(arch, "all") != 0) {
+                    char *base_all = d99_xasprintf("%s/dists/%s/%s/binary-all",
+                                                   e->uri, e->suite, e->comps.v[c]);
+                    if (fetch_index(base_all, e->uri, p->lists_dir, mf) == 0)
+                        any = 1;
+                    free(base_all);
+                }
             }
         }
         if (!any)
@@ -525,9 +542,13 @@ static int plan_install(const char *cmd_name, paths *p, struct target_spec *targ
                 cand_ensure_deps(nodes[i].cand, repo->ar);
                 dl = &nodes[i].cand->provides;
             }
-            for (k = 0; k < dl->n; k++)
-                for (j = 0; j < dl->g[k].n; j++)
-                    mm_put(&byname, dl->g[k].alts[j].name, (int)i);
+            for (k = 0; k < dl->n; k++) {
+                for (j = 0; j < dl->g[k].n; j++) {
+                    const char *pname = dl->g[k].alts[j].name;
+                    if (strcmp(pname, nodes[i].name) != 0)
+                        mm_put(&byname, pname, (int)i);
+                }
+            }
         }
     }
 
@@ -558,10 +579,22 @@ static int plan_install(const char *cmd_name, paths *p, struct target_spec *targ
                         if (!d99_arch_ok(alt->arch, d99_host_arch()))
                             continue;
                         n = mm_get(&byname, alt->name, &ids);
-                        for (q = 0; q < n && nl < 512; q++)
+                        for (q = 0; q < n && nl < 512; q++) {
                             if (node_satisfies(&nodes[ids[q]], alt->name,
-                                               alt->op, alt->ver))
-                                lits[nl++] = D99_LIT_POS(nodes[ids[q]].var);
+                                               alt->op, alt->ver)) {
+                                int pos_lit = D99_LIT_POS(nodes[ids[q]].var);
+                                int dup = 0;
+                                int l;
+                                for (l = 0; l < nl; l++) {
+                                    if (lits[l] == pos_lit) {
+                                        dup = 1;
+                                        break;
+                                    }
+                                }
+                                if (!dup)
+                                    lits[nl++] = pos_lit;
+                            }
+                        }
                     }
                     d99_sat_clause(sat, lits, nl);
                 }
@@ -584,7 +617,7 @@ static int plan_install(const char *cmd_name, paths *p, struct target_spec *targ
                         n = mm_get(&byname, alt->name, &ids);
                         for (q = 0; q < n; q++) {
                             pnode *nd = &nodes[ids[q]];
-                            if (nd == &nodes[i])
+                            if (nd == &nodes[i] || nd->var == nodes[i].var)
                                 continue;
                             if (node_satisfies(nd, alt->name, alt->op, alt->ver)) {
                                 int pair[2];
@@ -606,16 +639,31 @@ static int plan_install(const char *cmd_name, paths *p, struct target_spec *targ
         {
             int same[64];
             int nsame = 0;
-            for (k = 0; (int)k < byname.vn[j] && nsame < 64; k++)
-                if (strcmp(nodes[byname.vals[j][k]].name, byname.keys[j]) == 0)
-                    same[nsame++] = nodes[byname.vals[j][k]].var;
-            for (k = 0; k < (size_t)nsame; k++)
+            for (k = 0; (int)k < byname.vn[j] && nsame < 64; k++) {
+                int var = nodes[byname.vals[j][k]].var;
+                int exists = 0;
+                size_t s;
+                if (strcmp(nodes[byname.vals[j][k]].name, byname.keys[j]) != 0)
+                    continue;
+                for (s = 0; s < (size_t)nsame; s++) {
+                    if (same[s] == var) {
+                        exists = 1;
+                        break;
+                    }
+                }
+                if (!exists)
+                    same[nsame++] = var;
+            }
+            for (k = 0; k < (size_t)nsame; k++) {
                 for (i = k + 1; i < (size_t)nsame; i++) {
+                    if (same[k] == same[i])
+                        continue;
                     int pair[2];
                     pair[0] = D99_LIT_NEG(same[k]);
                     pair[1] = D99_LIT_NEG(same[i]);
                     d99_sat_clause(sat, pair, 2);
                 }
+            }
         }
     }
 
@@ -883,7 +931,7 @@ static int run_inst(char *const argv[])
 
 static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
                         struct target_spec *targets, int ntargets,
-                        int yes, int download_only, int print_uris)
+                        int yes, int download_only, int print_uris, int simulate)
 {
     action *acts = NULL;
     size_t nacts = 0, i;
@@ -914,6 +962,12 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
     }
     printf("%lu package(s), %lld bytes of archives\n",
            (unsigned long)nacts, total_size);
+
+    if (simulate) {
+        free_actions(acts, nacts);
+        free(inst);
+        return 0;
+    }
 
     if (!print_uris && !confirm(yes)) {
         printf("d99-solve: aborted\n");
@@ -1250,7 +1304,7 @@ int main(int argc, char **argv)
     paths p;
     const char *root = "/";
     const char *arch = NULL;
-    int yes = 0, download_only = 0, print_uris = 0;
+    int yes = 0, download_only = 0, print_uris = 0, simulate = 0;
     const char *cmd = NULL;
     d99_strvec ops;
     int i, rc;
@@ -1277,6 +1331,14 @@ int main(int argc, char **argv)
                     download_only = 1;
                 else if (strcmp(a, "--print-uris") == 0)
                     print_uris = 1;
+                else if (strcmp(a, "--simulate") == 0 ||
+                         strcmp(a, "--dry-run") == 0 ||
+                         strcmp(a, "--just-print") == 0 ||
+                         strcmp(a, "--recon") == 0 ||
+                         strcmp(a, "--no-act") == 0)
+                    simulate = 1;
+                else if (strcmp(a, "--quiet") == 0)
+                    ;
                 else if (strcmp(a, "--reinstall") == 0)
                     ;   /* accepted; same-version reinstalls are a no-op */
                 else if (strcmp(a, "--verbose") == 0)
@@ -1296,6 +1358,8 @@ int main(int argc, char **argv)
                     switch (*q) {
                     case 'y': yes = 1; break;
                     case 'd': download_only = 1; break;
+                    case 's': simulate = 1; break;
+                    case 'q': break;
                     case 'v': d99_set_verbose(1); break;
                     default: d99_fallback_or_die(argv[0], argv);
                     }
@@ -1333,7 +1397,7 @@ int main(int argc, char **argv)
                     bad = 1;
             if (!bad)
                 rc = cmd_install(argv[0], cmd_name, &p, targets, (int)ops.n, yes,
-                                 download_only, print_uris);
+                                 download_only, print_uris, simulate);
             for (k = 0; (size_t)k < ops.n; k++) {
                 free(targets[k].name);
                 free(targets[k].ver);
