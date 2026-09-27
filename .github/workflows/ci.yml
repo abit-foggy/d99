@@ -27,6 +27,7 @@ jobs:
       - name: Package artifacts
         run: |
           tar -czf d99-nightly-linux-amd64.tar.gz -C output/bin d99-deb d99-query d99-inst d99-solve d99-build
+          cp d99-nightly-linux-amd64.tar.gz d99-linux-amd64.tar.gz
 
       - name: Upload nightly release
         uses: softprops/action-gh-release@v2
@@ -34,4 +35,6 @@ jobs:
           tag_name: nightly
           name: d99 Nightly
           prerelease: true
-          files: d99-nightly-linux-amd64.tar.gz
+          files: |
+            d99-nightly-linux-amd64.tar.gz
+            d99-linux-amd64.tar.gz

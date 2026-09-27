@@ -12,22 +12,46 @@ Debian packaging toolchain in C99.
 
 ## Installation
 
-Install pre-built release binaries:
+### Stable Release
+
+Install latest stable release and activate system swap in one step:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/abit-foggy/d99/main/scripts/stable.sh | sudo sh
+```
+
+Or run modular steps individually:
+
+```sh
+# install binaries only into /usr/local/bin
+curl -fsSL https://raw.githubusercontent.com/abit-foggy/d99/main/scripts/stable/install.sh | sudo sh
+
+# activate system swap
+curl -fsSL https://raw.githubusercontent.com/abit-foggy/d99/main/scripts/stable/swap.sh | sudo sh
+```
+
+### Nightly Build
+
+Install latest nightly build and activate system swap:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/abit-foggy/d99/main/scripts/nightly.sh | sudo sh
+```
+
+Or run modular steps individually:
+
+```sh
+# install nightly binaries (or build from source if prebuilt asset is not yet available)
+curl -fsSL https://raw.githubusercontent.com/abit-foggy/d99/main/scripts/nightly/install.sh | sudo sh
+
+# activate system swap
+curl -fsSL https://raw.githubusercontent.com/abit-foggy/d99/main/scripts/nightly/swap.sh | sudo sh
+```
+
+Pre-built release tarballs are also directly downloadable:
 
 ```sh
 curl -fsSL https://github.com/abit-foggy/d99/releases/latest/download/d99-linux-amd64.tar.gz | sudo tar -xz -C /usr/local/bin
-```
-
-System swap (divert upstream tools and activate d99):
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/abit-foggy/d99/main/scripts/d99-swap.sh | sudo sh
-```
-
-System purge (permanently remove diverted upstream binaries):
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/abit-foggy/d99/main/scripts/d99-purge.sh | sudo sh
 ```
 
 ## Building
@@ -68,20 +92,29 @@ d99-solve remove <package>
 
 ## System Swap
 
+To swap system tools with d99 binaries:
+
 ```sh
-sudo scripts/d99-swap.sh            # divert and symlink over system tools
-sudo scripts/d99-swap.sh --revert   # restore system tools
-sudo scripts/d99-swap.sh --dry-run  # preview changes without applying
+# using runner
+sudo scripts/stable.sh --swap-only          # or scripts/nightly.sh --swap-only
+sudo scripts/stable.sh --revert             # restore system tools
+sudo scripts/stable.sh --swap-only --dry-run # preview changes without applying
+
+# or using modular swap script
+sudo scripts/stable/swap.sh                 # divert and symlink over system tools
+sudo scripts/stable/swap.sh --revert        # restore system tools
+sudo scripts/stable/swap.sh --dry-run       # preview changes without applying
 ```
 
 ## System Purge
 
 > [!WARNING]
-> Running `d99-purge.sh --apply` permanently deletes the diverted upstream tool binaries (`/usr/bin/*.upstream`) and upstream Perl packaging directories (`/usr/share/dpkg`). This action is irreversible and prevents reverting back to upstream APT/dpkg via `d99-swap.sh --revert`. Only apply this if you intend to run `d99` completely standalone without upstream fallback.
+> Running `purge` permanently deletes the diverted upstream tool binaries (`/usr/bin/*.upstream`) and upstream Perl packaging directories (`/usr/share/dpkg`). This action is irreversible and prevents reverting back to upstream APT/dpkg via `--revert`. Only apply this if you intend to run `d99` completely standalone without upstream fallback.
 
 ```sh
-sudo scripts/d99-purge.sh           # dry run
-sudo scripts/d99-purge.sh --apply   # replace system tools
+sudo scripts/stable.sh --purge --dry-run    # preview files to purge
+sudo scripts/stable.sh --purge              # purge with confirmation prompt
+sudo scripts/stable.sh --purge -y           # purge without confirmation prompt
 ```
 
 ## License
