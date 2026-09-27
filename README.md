@@ -27,7 +27,7 @@ curl -fsSL https://raw.githubusercontent.com/abit-foggy/d99/main/scripts/d99-swa
 System purge (permanently remove diverted upstream binaries):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/abit-foggy/d99/main/scripts/d99-purge.sh | sudo sh -s -- --apply
+curl -fsSL https://raw.githubusercontent.com/abit-foggy/d99/main/scripts/d99-purge.sh | sudo sh
 ```
 
 ## Building

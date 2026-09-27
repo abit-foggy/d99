@@ -1,16 +1,21 @@
 #!/bin/sh
 # Usage:
-#   d99-purge.sh            list what would be removed (dry run)
-#   d99-purge.sh --apply    actually delete
+#   d99-purge.sh            permanently delete diverted upstream binaries (prompts for confirmation)
+#   d99-purge.sh -y         permanently delete without prompting
+#   d99-purge.sh --dry-run  list what would be removed
 #
-# Requires root. 
+# Requires root.
 set -u
 
-APPLY=0
+DRY_RUN=0
+CONFIRMED=0
+
 for arg in "$@"; do
     case "$arg" in
-        --apply) APPLY=1 ;;
-        *) echo "usage: $0 [--apply]" >&2; exit 2 ;;
+        --dry-run) DRY_RUN=1 ;;
+        -y|--yes|-f|--force) CONFIRMED=1 ;;
+        --apply) ;;
+        *) echo "usage: $0 [--dry-run] [-y|--yes]" >&2; exit 2 ;;
     esac
 done
 
@@ -19,39 +24,69 @@ if [ "$(id -u)" -ne 0 ]; then
     exit 1
 fi
 
-removed=0
+CANDIDATES="/usr/bin/dpkg-deb.upstream /usr/bin/dpkg-query.upstream \
+            /usr/bin/dpkg.upstream /usr/bin/apt.upstream /usr/bin/apt-get.upstream \
+            /usr/local/bin/apt.mint"
 
-for f in /usr/bin/dpkg-deb.upstream /usr/bin/dpkg-query.upstream \
-         /usr/bin/dpkg.upstream /usr/bin/apt.upstream /usr/bin/apt-get.upstream \
-         /usr/local/bin/apt.mint; do
+TO_REMOVE=""
+for f in $CANDIDATES; do
     if [ -e "$f" ]; then
-        if [ "$APPLY" -eq 1 ]; then
-            rm -f "$f"
-            echo "removed $f"
-        else
-            echo "would remove $f"
-        fi
-        removed=$((removed + 1))
+        TO_REMOVE="$TO_REMOVE $f"
     fi
 done
 
-# perl-based dpkg tooling
 if [ -d /usr/share/dpkg ]; then
-    if [ "$APPLY" -eq 1 ]; then
-        rm -rf /usr/share/dpkg
-        echo "removed /usr/share/dpkg"
-    else
-        echo "would remove /usr/share/dpkg"
-    fi
-    removed=$((removed + 1))
+    TO_REMOVE="$TO_REMOVE /usr/share/dpkg"
 fi
 
-if [ "$removed" -eq 0 ]; then
+if [ -z "$TO_REMOVE" ]; then
     echo "nothing to purge"
+    exit 0
 fi
-if [ "$APPLY" -eq 0 ] && [ "$removed" -gt 0 ]; then
+
+if [ "$DRY_RUN" -eq 1 ]; then
+    for item in $TO_REMOVE; do
+        echo "would remove $item"
+    done
     echo
-    echo "dry run only; pass --apply to delete"
+    echo "dry run only; omit --dry-run to purge"
     echo "note: diversion registrations are kept (updates still divert to *.upstream)"
+    exit 0
 fi
+
+echo "The following upstream files and directories will be permanently removed:"
+for item in $TO_REMOVE; do
+    echo "  $item"
+done
+echo
+
+if [ "$CONFIRMED" -eq 0 ]; then
+    printf "Do you really want to permanently purge these files? [y/N] "
+    reply=""
+    if [ -t 0 ]; then
+        read -r reply
+    elif [ -r /dev/tty ]; then
+        read -r reply < /dev/tty
+    else
+        echo >&2
+        echo "d99-purge: interactive input not available; pass -y to confirm" >&2
+        exit 1
+    fi
+
+    case "$reply" in
+        [yY]|[yY][eE][sS]) ;;
+        *)
+            echo "Purge cancelled."
+            exit 0
+            ;;
+    esac
+fi
+
+for item in $TO_REMOVE; do
+    rm -rf "$item"
+    echo "removed $item"
+done
+
+echo
+echo "note: diversion registrations are kept (updates still divert to *.upstream)"
 exit 0
