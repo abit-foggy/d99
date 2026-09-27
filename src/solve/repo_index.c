@@ -170,6 +170,9 @@ int repo_build_index(const char *lists_dir)
                         char *v = hit + strlen(needle);
                         size_t n = eol ? (size_t)(eol - v) : strlen(v);
                         base = d99_xstrndup(v, n);
+                    } else if (strncmp(de->d_name, "d99_", 4) == 0) {
+                        free(text);
+                        continue;
                     }
                 }
             }
