@@ -167,14 +167,15 @@ static int cmd_list(src *s, char **pats, int npat)
 
     if (s->ix) {
         for (i = 0; i < d99_index_count(s->ix); i++) {
-            qpkg q;
+            const char *pkg_name = d99_index_name(s->ix, i);
             int match = (npat == 0);
             int k;
             for (k = 0; k < npat && !match; k++)
-                if (d99_glob_match(pats[k], q.name ? q.name : ""))
+                if (d99_glob_match(pats[k], pkg_name ? pkg_name : ""))
                     match = 1;
             if (!match)
                 continue;
+            qpkg q;
             fill_ix(&q, s->ix, i);
             print_list_row(&q);
         }
