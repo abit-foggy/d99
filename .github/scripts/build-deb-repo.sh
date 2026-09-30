@@ -33,15 +33,16 @@ Architecture: amd64
 Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
 Depends: libc6, zlib1g, liblzma5, libzstd1
 Provides: dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0)
-Replaces: dpkg, apt, dpkg-dev, apt-utils
-Description: Debian packaging toolchain in C99
+Replaces: d99-nightly, dpkg, apt, dpkg-dev, apt-utils
+Conflicts: d99-nightly
+Description: Debian packaging toolchain in C99 (Stable)
  d99 is a lightweight Debian packaging toolchain implemented in C99,
  superseding standard dpkg, apt, dpkg-dev, and apt-utils.
 EOF
 dpkg-deb -b "${STAGE_DIR}" "${REPO_DIR}/pool/main/d/d99/d99_0.1.0-1_amd64.deb"
 rm -rf "${STAGE_DIR}"
 
-# 2. Build and package Nightly (999.0.0+nightly.<sha>)
+# 2. Build and package Nightly (d99-nightly: 999.0.0+nightly.<sha>)
 NIGHTLY_VER="999.0.0+nightly.${SHORT_SHA}"
 echo "==> Building nightly package (${NIGHTLY_VER})..."
 make clean
@@ -51,41 +52,22 @@ mkdir -p "${STAGE_DIR}/DEBIAN" "${STAGE_DIR}/usr/bin"
 cp "${REPO_ROOT}/output/bin/"d99-* "${STAGE_DIR}/usr/bin/"
 chmod 0755 "${STAGE_DIR}/usr/bin/"*
 cat > "${STAGE_DIR}/DEBIAN/control" <<EOF
-Package: d99
+Package: d99-nightly
 Version: ${NIGHTLY_VER}
 Section: utils
 Priority: optional
 Architecture: amd64
 Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
 Depends: libc6, zlib1g, liblzma5, libzstd1
-Provides: dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0), d99-nightly
-Replaces: dpkg, apt, dpkg-dev, apt-utils
-Description: Debian packaging toolchain in C99 (Nightly snapshot)
+Provides: d99 (= ${NIGHTLY_VER}), dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0)
+Replaces: d99, dpkg, apt, dpkg-dev, apt-utils
+Conflicts: d99
+Description: Debian packaging toolchain in C99 (Nightly)
  d99 is a lightweight Debian packaging toolchain implemented in C99,
  superseding standard dpkg, apt, dpkg-dev, and apt-utils.
  Nightly builds track main development snapshots and out-version stable.
 EOF
-dpkg-deb -b "${STAGE_DIR}" "${REPO_DIR}/pool/main/d/d99/d99_${NIGHTLY_VER}_amd64.deb"
-rm -rf "${STAGE_DIR}"
-
-# 2b. Build and package d99-nightly metapackage
-echo "==> Building d99-nightly package (${NIGHTLY_VER})..."
-STAGE_DIR="$(mktemp -d /tmp/d99-deb-nightly-meta.XXXXXX)"
-mkdir -p "${STAGE_DIR}/DEBIAN"
-cat > "${STAGE_DIR}/DEBIAN/control" <<EOF
-Package: d99-nightly
-Version: ${NIGHTLY_VER}
-Section: utils
-Priority: optional
-Architecture: all
-Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
-Depends: d99 (= ${NIGHTLY_VER})
-Provides: dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0)
-Replaces: dpkg, apt, dpkg-dev, apt-utils
-Description: Debian packaging toolchain in C99 (Nightly tracking package)
- Metapackage depending on the latest d99 nightly snapshot build.
-EOF
-dpkg-deb -b "${STAGE_DIR}" "${REPO_DIR}/pool/main/d/d99/d99-nightly_${NIGHTLY_VER}_all.deb"
+dpkg-deb -b "${STAGE_DIR}" "${REPO_DIR}/pool/main/d/d99/d99-nightly_${NIGHTLY_VER}_amd64.deb"
 rm -rf "${STAGE_DIR}"
 
 # Copy deb files to repo root as well so flat path './' works directly
@@ -93,8 +75,11 @@ cp "${REPO_DIR}/pool/main/d/d99/"*.deb "${REPO_DIR}/"
 
 # 3. Generate APT repository indexes
 echo "==> Generating APT indexes..."
-# dists/stable (includes both stable & nightly so updating 'stable' picks up nightly if present, or stable)
-(cd "${REPO_DIR}" && apt-ftparchive packages pool > dists/stable/main/binary-amd64/Packages)
+# dists/stable: only stable package
+mkdir -p "${REPO_DIR}/tmp_stable"
+cp "${REPO_DIR}/pool/main/d/d99/d99_0.1.0-1_amd64.deb" "${REPO_DIR}/tmp_stable/"
+(cd "${REPO_DIR}" && apt-ftparchive packages tmp_stable | sed 's|Filename: tmp_stable/|Filename: pool/main/d/d99/|' > dists/stable/main/binary-amd64/Packages)
+rm -rf "${REPO_DIR}/tmp_stable"
 gzip -9k -f "${REPO_DIR}/dists/stable/main/binary-amd64/Packages"
 touch "${REPO_DIR}/dists/stable/main/binary-all/Packages"
 gzip -9k -f "${REPO_DIR}/dists/stable/main/binary-all/Packages"
@@ -107,9 +92,12 @@ gzip -9k -f "${REPO_DIR}/dists/stable/main/binary-all/Packages"
     -o APT::FTPArchive::Release::Architectures="amd64 all" \
     release dists/stable > dists/stable/Release)
 
-# dists/nightly
-cp "${REPO_DIR}/dists/stable/main/binary-amd64/Packages" "${REPO_DIR}/dists/nightly/main/binary-amd64/Packages"
-cp "${REPO_DIR}/dists/stable/main/binary-amd64/Packages.gz" "${REPO_DIR}/dists/nightly/main/binary-amd64/Packages.gz"
+# dists/nightly: only nightly package
+mkdir -p "${REPO_DIR}/tmp_nightly"
+cp "${REPO_DIR}/pool/main/d/d99/d99-nightly_${NIGHTLY_VER}_amd64.deb" "${REPO_DIR}/tmp_nightly/"
+(cd "${REPO_DIR}" && apt-ftparchive packages tmp_nightly | sed 's|Filename: tmp_nightly/|Filename: pool/main/d/d99/|' > dists/nightly/main/binary-amd64/Packages)
+rm -rf "${REPO_DIR}/tmp_nightly"
+gzip -9k -f "${REPO_DIR}/dists/nightly/main/binary-amd64/Packages"
 touch "${REPO_DIR}/dists/nightly/main/binary-all/Packages"
 gzip -9k -f "${REPO_DIR}/dists/nightly/main/binary-all/Packages"
 (cd "${REPO_DIR}" && apt-ftparchive \
