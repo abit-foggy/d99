@@ -1219,6 +1219,70 @@ static char *find_inst_tool(const char *argv0)
     return d99_xstrdup("d99-inst");
 }
 
+static void format_size(char *buf, size_t bufsz, long long bytes)
+{
+    if (bytes >= 1073741824LL)
+        snprintf(buf, bufsz, "%.1f GB", bytes / 1073741824.0);
+    else if (bytes >= 1048576LL)
+        snprintf(buf, bufsz, "%.1f MB", bytes / 1048576.0);
+    else if (bytes >= 1024LL)
+        snprintf(buf, bufsz, "%.1f kB", bytes / 1024.0);
+    else
+        snprintf(buf, bufsz, "%lld B", bytes);
+}
+
+static void format_speed(char *buf, size_t bufsz, double bytes_per_sec)
+{
+    if (bytes_per_sec >= 1073741824.0)
+        snprintf(buf, bufsz, "%.1f GB/s", bytes_per_sec / 1073741824.0);
+    else if (bytes_per_sec >= 1048576.0)
+        snprintf(buf, bufsz, "%.1f MB/s", bytes_per_sec / 1048576.0);
+    else if (bytes_per_sec >= 1024.0)
+        snprintf(buf, bufsz, "%.1f kB/s", bytes_per_sec / 1024.0);
+    else
+        snprintf(buf, bufsz, "%.0f B/s", bytes_per_sec);
+}
+
+static void format_eta(char *buf, size_t bufsz, long long remaining_bytes, double bytes_per_sec)
+{
+    if (bytes_per_sec <= 0 || remaining_bytes <= 0) {
+        snprintf(buf, bufsz, "0s");
+        return;
+    }
+    long long secs = (long long)(remaining_bytes / bytes_per_sec);
+    if (secs >= 3600)
+        snprintf(buf, bufsz, "%lldh%02lldm", secs / 3600, (secs % 3600) / 60);
+    else if (secs >= 60)
+        snprintf(buf, bufsz, "%lldm%02llds", secs / 60, secs % 60);
+    else
+        snprintf(buf, bufsz, "%llds", secs);
+}
+
+static void draw_download_progress(long long cur_bytes, long long total_bytes,
+                                   double bytes_per_sec, int max_pct, const char *pkg_name)
+{
+    if (!isatty(STDOUT_FILENO)) return;
+    int pct = (total_bytes > 0) ? (int)((cur_bytes * max_pct) / total_bytes) : 0;
+    if (pct > max_pct) pct = max_pct;
+    int width = 24;
+    int filled = (pct * width) / 100;
+    char cur_str[32], tot_str[32], spd_str[32], eta_str[32];
+    format_size(cur_str, sizeof cur_str, cur_bytes);
+    format_size(tot_str, sizeof tot_str, total_bytes);
+    format_speed(spd_str, sizeof spd_str, bytes_per_sec);
+    long long rem = (total_bytes > cur_bytes) ? (total_bytes - cur_bytes) : 0;
+    format_eta(eta_str, sizeof eta_str, rem, bytes_per_sec);
+
+    printf("\r\033[KProgress: [%3d%%] [", pct);
+    for (int i = 0; i < filled; i++) putchar('#');
+    for (int i = filled; i < width; i++) putchar('.');
+    if (pkg_name && *pkg_name)
+        printf("] %s/%s (%s, ETA %s) [%s]\r", cur_str, tot_str, spd_str, eta_str, pkg_name);
+    else
+        printf("] %s/%s (%s, ETA %s)\r", cur_str, tot_str, spd_str, eta_str);
+    fflush(stdout);
+}
+
 static int run_inst(char *const argv[])
 {
     pid_t pid = fork();
@@ -1396,6 +1460,13 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
                     backup_old_package(p, acts[uidx].name, acts[uidx].old_version);
                     unpack_pid = fork();
                     if (unpack_pid == 0) {
+                        char p_start_s[16], p_end_s[16];
+                        int start_p = 50 + (int)((uidx * 25) / nacts);
+                        int end_p = 50 + (int)(((uidx + 1) * 25) / nacts);
+                        snprintf(p_start_s, sizeof p_start_s, "%d", start_p);
+                        snprintf(p_end_s, sizeof p_end_s, "%d", end_p);
+                        setenv("D99_PROGRESS_START", p_start_s, 1);
+                        setenv("D99_PROGRESS_END", p_end_s, 1);
                         char *ro_arg = (strcmp(p->root, "/") != 0) ? d99_xasprintf("--root=%s", p->root) : NULL;
                         if (ro_arg)
                             execl(inst, inst, ro_arg, "--unpack", "--force-depends", dests[uidx], (char *)NULL);
@@ -1414,29 +1485,22 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
                     if (done_pid == 0) {
                         if (isatty(STDOUT_FILENO) && total_size > 0) {
                             long long cur_bytes = total_bytes_fetched;
+                            const char *active_pkg = NULL;
                             for (w = 0; w < D99_MAX_DOWNLOAD_WORKERS; w++) {
                                 if (workers[w].pid > 0) {
                                     struct stat st;
                                     if (stat(dests[workers[w].idx], &st) == 0)
                                         cur_bytes += st.st_size;
+                                    if (!active_pkg)
+                                        active_pkg = acts[workers[w].idx].name;
                                 }
                             }
                             gettimeofday(&t_now, NULL);
                             double el = (t_now.tv_sec - t_start.tv_sec) + (t_now.tv_usec - t_start.tv_usec) / 1000000.0;
                             if (el < 0.001) el = 0.001;
-                            double cur_kbps = (cur_bytes / 1024.0) / el;
-                            int pct = (int)((cur_bytes * 100) / total_size);
-                            if (pct > 100) pct = 100;
-                            int width = 30;
-                            int filled = (pct * width) / 100;
-                            printf("\r\033[KProgress: [%3d%%] [", pct);
-                            for (int b = 0; b < filled; b++) putchar('#');
-                            for (int b = filled; b < width; b++) putchar('.');
-                            if (total_size >= 1048576)
-                                printf("] %.1f/%.1f MB (%.1f kB/s)\r", cur_bytes / 1048576.0, total_size / 1048576.0, cur_kbps);
-                            else
-                                printf("] %.1f/%.1f kB (%.1f kB/s)\r", cur_bytes / 1024.0, total_size / 1024.0, cur_kbps);
-                            fflush(stdout);
+                            double cur_bps = cur_bytes / el;
+                            int max_dl_pct = download_only ? 100 : 50;
+                            draw_download_progress(cur_bytes, total_size, cur_bps, max_dl_pct, active_pkg);
                         }
                         usleep(30000);
                         continue;
@@ -1533,7 +1597,11 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
         for (i = 0; i < nacts; i++)
             av[na++] = acts[i].name;
         av[na] = NULL;
+        setenv("D99_PROGRESS_START", "75", 1);
+        setenv("D99_PROGRESS_END", "100", 1);
         rc = run_inst(av);
+        unsetenv("D99_PROGRESS_START");
+        unsetenv("D99_PROGRESS_END");
         free(av);
         free(ro);
         ro = NULL;
@@ -1548,13 +1616,24 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
         for (i = 0; i < files.n; i++)
             av[na++] = files.v[i];
         av[na] = NULL;
+        if (total_size > 0) {
+            setenv("D99_PROGRESS_START", "50", 1);
+            setenv("D99_PROGRESS_END", "100", 1);
+        } else {
+            setenv("D99_PROGRESS_START", "0", 1);
+            setenv("D99_PROGRESS_END", "100", 1);
+        }
         rc = run_inst(av);
+        unsetenv("D99_PROGRESS_START");
+        unsetenv("D99_PROGRESS_END");
         free(av);
         free(ro);
         ro = NULL;
     }
 
     if (rc == 0) {
+        if (isatty(STDOUT_FILENO))
+            printf("\r\033[KProgress: [100%%] [########################] Complete\n");
         log_history(p->log_file, cmd_name, acts, nacts, 0);
         for (i = 0; i < nacts; i++) {
             int is_manual = 0;
