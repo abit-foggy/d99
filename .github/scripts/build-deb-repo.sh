@@ -16,17 +16,18 @@ mkdir -p "${REPO_DIR}/dists/stable/main/binary-all"
 mkdir -p "${REPO_DIR}/dists/nightly/main/binary-amd64"
 mkdir -p "${REPO_DIR}/dists/nightly/main/binary-all"
 
-# 1. Build and package Stable (v0.1.0-1)
-echo "==> Building stable package (v0.1.0-1)..."
+# 1. Build and package Stable (v0.2.0-1)
+STABLE_VER="0.2.0"
+echo "==> Building stable package (v${STABLE_VER}-1)..."
 make clean
-make VERSION="0.1.0" -j"$(nproc 2>/dev/null || echo 2)"
+make VERSION="${STABLE_VER}" -j"$(nproc 2>/dev/null || echo 2)"
 STAGE_DIR="$(mktemp -d /tmp/d99-deb-stable.XXXXXX)"
 mkdir -p "${STAGE_DIR}/DEBIAN" "${STAGE_DIR}/usr/bin"
 cp "${REPO_ROOT}/output/bin/"d99-* "${STAGE_DIR}/usr/bin/"
 chmod 0755 "${STAGE_DIR}/usr/bin/"*
 cat > "${STAGE_DIR}/DEBIAN/control" <<EOF
 Package: d99
-Version: 0.1.0-1
+Version: ${STABLE_VER}-1
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -39,7 +40,7 @@ Description: Debian packaging toolchain in C99 (Stable)
  d99 is a lightweight Debian packaging toolchain implemented in C99,
  superseding standard dpkg, apt, dpkg-dev, and apt-utils.
 EOF
-dpkg-deb -b "${STAGE_DIR}" "${REPO_DIR}/pool/main/d/d99/d99_0.1.0-1_amd64.deb"
+dpkg-deb -b "${STAGE_DIR}" "${REPO_DIR}/pool/main/d/d99/d99_${STABLE_VER}-1_amd64.deb"
 rm -rf "${STAGE_DIR}"
 
 # 2. Build and package Nightly (d99-nightly: 999.0.0+nightly.<sha>)

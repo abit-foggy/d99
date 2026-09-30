@@ -1,6 +1,6 @@
 include config.mk
 
-VERSION ?= 0.1.0
+VERSION ?= 0.2.0
 
 CFLAGS := -std=c99 -pedantic -Wall -Wextra -Werror -O2 -g \
           -D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE -D_FILE_OFFSET_BITS=64 \
