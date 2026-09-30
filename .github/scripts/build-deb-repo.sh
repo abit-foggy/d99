@@ -75,11 +75,8 @@ cp "${REPO_DIR}/pool/main/d/d99/"*.deb "${REPO_DIR}/"
 
 # 3. Generate APT repository indexes
 echo "==> Generating APT indexes..."
-# dists/stable: only stable package
-mkdir -p "${REPO_DIR}/tmp_stable"
-cp "${REPO_DIR}/pool/main/d/d99/d99_0.1.0-1_amd64.deb" "${REPO_DIR}/tmp_stable/"
-(cd "${REPO_DIR}" && apt-ftparchive packages tmp_stable | sed 's|Filename: tmp_stable/|Filename: pool/main/d/d99/|' > dists/stable/main/binary-amd64/Packages)
-rm -rf "${REPO_DIR}/tmp_stable"
+# dists/stable (includes both d99 and d99-nightly)
+(cd "${REPO_DIR}" && apt-ftparchive packages pool > dists/stable/main/binary-amd64/Packages)
 gzip -9k -f "${REPO_DIR}/dists/stable/main/binary-amd64/Packages"
 touch "${REPO_DIR}/dists/stable/main/binary-all/Packages"
 gzip -9k -f "${REPO_DIR}/dists/stable/main/binary-all/Packages"
@@ -92,12 +89,9 @@ gzip -9k -f "${REPO_DIR}/dists/stable/main/binary-all/Packages"
     -o APT::FTPArchive::Release::Architectures="amd64 all" \
     release dists/stable > dists/stable/Release)
 
-# dists/nightly: only nightly package
-mkdir -p "${REPO_DIR}/tmp_nightly"
-cp "${REPO_DIR}/pool/main/d/d99/d99-nightly_${NIGHTLY_VER}_amd64.deb" "${REPO_DIR}/tmp_nightly/"
-(cd "${REPO_DIR}" && apt-ftparchive packages tmp_nightly | sed 's|Filename: tmp_nightly/|Filename: pool/main/d/d99/|' > dists/nightly/main/binary-amd64/Packages)
-rm -rf "${REPO_DIR}/tmp_nightly"
-gzip -9k -f "${REPO_DIR}/dists/nightly/main/binary-amd64/Packages"
+# dists/nightly (includes both d99 and d99-nightly)
+cp "${REPO_DIR}/dists/stable/main/binary-amd64/Packages" "${REPO_DIR}/dists/nightly/main/binary-amd64/Packages"
+cp "${REPO_DIR}/dists/stable/main/binary-amd64/Packages.gz" "${REPO_DIR}/dists/nightly/main/binary-amd64/Packages.gz"
 touch "${REPO_DIR}/dists/nightly/main/binary-all/Packages"
 gzip -9k -f "${REPO_DIR}/dists/nightly/main/binary-all/Packages"
 (cd "${REPO_DIR}" && apt-ftparchive \
