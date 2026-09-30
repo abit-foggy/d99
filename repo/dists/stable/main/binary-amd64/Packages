@@ -1,19 +1,19 @@
 Package: d99-nightly
 Architecture: amd64
-Version: 999.0.0+nightly.19d3789
+Version: 999.0.0+nightly.8d793c7
 Priority: optional
 Section: utils
 Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
-Provides: d99 (= 999.0.0+nightly.19d3789), dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0)
+Provides: d99 (= 999.0.0+nightly.8d793c7), dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0)
 Depends: libc6, zlib1g, liblzma5, libzstd1
 Conflicts: d99
 Replaces: d99, dpkg, apt, dpkg-dev, apt-utils
-Filename: pool/main/d/d99/d99-nightly_999.0.0+nightly.19d3789_amd64.deb
-Size: 472186
-MD5sum: 832ca2d732e94f9674ec397e78feeb4a
-SHA1: e3d6071c11d59056a4d3e308e0c7b633b1364520
-SHA256: b142ed9f551fc72d9ef265a4c508f1e0124cfb4d944b5d1f0a58e489aacd2b33
-SHA512: 634c23eebaa60e04c479e486cdc6b49ff06a8132e0c4920c40e82622afaa819d7634e47315f6120903969badead36a8bea8850392ff72d822a5debf7fb6fea5f
+Filename: pool/main/d/d99/d99-nightly_999.0.0+nightly.8d793c7_amd64.deb
+Size: 477190
+MD5sum: 8d5fdd47d0c1e3a0a34277ec949a7b88
+SHA1: 0855bfcaa3089f75b5ef5f44bc1a7f97b81da9b9
+SHA256: 8ffbb98d9f7a040dde2b40168e627c478a421b1db431608b290f4b8a15adbd38
+SHA512: 7c0f90c3adde691379fbabc3cc97b8beadacd523bdd2aa36711daca76bc13a50137b43e191fd847ab0184d560a27f80cc4531909accce8d47ce66aa4907ca789
 Description: Debian packaging toolchain in C99 (Nightly)
  d99 is a lightweight Debian packaging toolchain implemented in C99,
  superseding standard dpkg, apt, dpkg-dev, and apt-utils.
@@ -30,11 +30,11 @@ Depends: libc6, zlib1g, liblzma5, libzstd1
 Conflicts: d99-nightly
 Replaces: d99-nightly, dpkg, apt, dpkg-dev, apt-utils
 Filename: pool/main/d/d99/d99_0.2.0-1_amd64.deb
-Size: 472074
-MD5sum: 03c1257754f19183c3a816a0897f7012
-SHA1: 7fb2b408835246b9fe6393d28a55369bf017477d
-SHA256: e45e2bb74d45f538aec25a89bb6be4a5269108c171a4c094b273164dbca2fe24
-SHA512: dc15244b912ed36612e3c2cedaa3486f58f45cc5e1b66bad598440e2cbe4817d8a4ae989c3872d32ee2d5404db06d2a5e00d291ca2b96db1a97feaff2a3dfb19
+Size: 477040
+MD5sum: ab59c3479f7af7980a2033563a2c1c1f
+SHA1: c386f0d3a16186b387d1bfa780d36f77fe8d2f3b
+SHA256: 2d557172555c17c996ce6f290821c617fa3e602509708261bd63170532d9ed64
+SHA512: 5150e849b18f26c8614e66ad0bdd90a7a90a37ca15be12331d8dac20b5982009fbe01d21c8790e357e2d7f0ce96eb593e52533ec25b30de7d9cdd882ad8b2ee2
 Description: Debian packaging toolchain in C99 (Stable)
  d99 is a lightweight Debian packaging toolchain implemented in C99,
  superseding standard dpkg, apt, dpkg-dev, and apt-utils.
