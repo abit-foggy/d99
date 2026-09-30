@@ -19,6 +19,7 @@ usage() {
     echo "  --revert           revert system swap (restore upstream tools)"
     echo "  --purge            permanently purge diverted upstream tools"
     echo "  --dry-run          preview actions without making changes"
+    echo "  -f, --force        force install even if nightly is present"
     echo "  -y, --yes          automatic yes to prompts (for purge)"
     echo "  -h, --help         show this help"
     exit "$code"
@@ -31,6 +32,7 @@ for arg in "$@"; do
         --revert)       ACTION="revert" ;;
         --purge)        ACTION="purge" ;;
         --dry-run)      DRY_RUN=1 ;;
+        -f|--force)     EXTRA_ARGS="${EXTRA_ARGS} --force" ;;
         -y|--yes)       CONFIRMED=1 ;;
         -h|--help)      usage 0 ;;
         *)              EXTRA_ARGS="${EXTRA_ARGS} ${arg}" ;;
@@ -58,7 +60,7 @@ case "$ACTION" in
         if [ "$DRY_RUN" -eq 1 ]; then
             echo "would download and install stable binaries into /usr/local/bin"
         else
-            "${SCRIPT_DIR}/stable/install.sh"
+            "${SCRIPT_DIR}/stable/install.sh" $EXTRA_ARGS
         fi
         ;;
     swap)
@@ -71,7 +73,7 @@ case "$ACTION" in
             echo "would download and install stable binaries into /usr/local/bin"
             "${SCRIPT_DIR}/stable/swap.sh" --dry-run
         else
-            "${SCRIPT_DIR}/stable/install.sh"
+            "${SCRIPT_DIR}/stable/install.sh" $EXTRA_ARGS
             "${SCRIPT_DIR}/stable/swap.sh"
         fi
         ;;

@@ -12,7 +12,17 @@ Debian packaging toolchain in C99.
 
 ## Installation
 
-### Stable Release
+### APT Repository (Debian / Ubuntu / Linux Mint)
+
+Add the official APT repository hosted on GitHub Pages:
+
+```sh
+echo "deb [trusted=yes] https://abit-foggy.github.io/d99/repo/ stable main" | sudo tee /etc/apt/sources.list.d/d99.list
+sudo apt update
+sudo apt install d99
+```
+
+### Stable Release (Binary Install)
 
 Install latest stable release and activate system swap in one step:
 

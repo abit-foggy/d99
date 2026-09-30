@@ -6,8 +6,7 @@ set -eu
 REPO="abit-foggy/d99"
 D99_BINDIR="${D99_BINDIR:-/usr/local/bin}"
 BUILD_FROM_SOURCE=0
-NIGHTLY_URL="https://github.com/${REPO}/releases/download/nightly/d99-nightly-linux-amd64.tar.gz"
-FALLBACK_URL="https://github.com/${REPO}/releases/download/nightly/d99-linux-amd64.tar.gz"
+TARBALL_URL="https://github.com/${REPO}/releases/download/nightly/d99-linux-amd64.tar.gz"
 
 usage() {
     echo "Usage: $0 [--build] [--bin-dir=<dir>]"
@@ -61,8 +60,7 @@ installed=0
 
 if [ "$BUILD_FROM_SOURCE" -eq 0 ]; then
     echo "d99: attempting to download nightly release from GitHub..."
-    if download_file "$NIGHTLY_URL" "${TMPDIR}/d99.tar.gz" || \
-       download_file "$FALLBACK_URL" "${TMPDIR}/d99.tar.gz"; then
+    if download_file "$TARBALL_URL" "${TMPDIR}/d99.tar.gz"; then
         mkdir -p "$D99_BINDIR"
         tar -xzf "${TMPDIR}/d99.tar.gz" -C "$D99_BINDIR"
         installed=1
@@ -78,7 +76,7 @@ if [ "$BUILD_FROM_SOURCE" -eq 1 ]; then
     # If currently inside a d99 git tree with Makefile
     if [ -f "./Makefile" ] && [ -f "./src/solve/main.c" ]; then
         SRCDIR="$(pwd)"
-        make -C "$SRCDIR" -j"$(nproc 2>/dev/null || echo 2)"
+        make -C "$SRCDIR" VERSION="999.0.0+nightly" -j"$(nproc 2>/dev/null || echo 2)"
         make -C "$SRCDIR" install PREFIX="/usr/local"
         installed=1
     else
@@ -87,7 +85,7 @@ if [ "$BUILD_FROM_SOURCE" -eq 1 ]; then
             exit 1
         fi
         git clone --depth 1 "https://github.com/${REPO}.git" "${TMPDIR}/d99-src"
-        make -C "${TMPDIR}/d99-src" -j"$(nproc 2>/dev/null || echo 2)"
+        make -C "${TMPDIR}/d99-src" VERSION="999.0.0+nightly" -j"$(nproc 2>/dev/null || echo 2)"
         make -C "${TMPDIR}/d99-src" install PREFIX="/usr/local"
         installed=1
     fi
@@ -99,7 +97,9 @@ if [ "$installed" -eq 1 ]; then
             chmod 0755 "${D99_BINDIR}/${bin}"
         fi
     done
-    echo "d99: successfully installed nightly build into ${D99_BINDIR}"
+    echo "tag=nightly" > "${D99_BINDIR}/.d99-tag"
+    chmod 0644 "${D99_BINDIR}/.d99-tag"
+    echo "d99: successfully installed nightly build (tag: nightly) into ${D99_BINDIR}"
     if [ -x "${D99_BINDIR}/d99-solve" ]; then
         "${D99_BINDIR}/d99-solve" --version
     fi
