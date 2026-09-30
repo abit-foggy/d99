@@ -116,9 +116,15 @@ static void ensure_tool_symlinks(const char *root)
         char *backup_full = d99_path_join(root, backup_rel);
         if (d99_file_exists(backup_full)) {
             char *target = d99_path_join(root, tools[i].tool_rel);
-            char *our_check = d99_path_join(root, "usr/local/bin");
-            char *our_file = d99_path_join(our_check, tools[i].our_bin);
-            if (d99_file_exists(our_file) || d99_file_exists(tools[i].our_bin)) {
+            char *our_usr_bin = d99_path_join(root, "usr/bin");
+            char *our_usr_file = d99_path_join(our_usr_bin, tools[i].our_bin);
+            char *our_local_bin = d99_path_join(root, "usr/local/bin");
+            char *our_local_file = d99_path_join(our_local_bin, tools[i].our_bin);
+
+            if (d99_file_exists(our_usr_file)) {
+                unlink(target);
+                (void)!symlink(tools[i].our_bin, target);
+            } else if (d99_file_exists(our_local_file)) {
                 const char *dest_prefix = (!root || strcmp(root, "/") == 0) ?
                                           "/usr/local/bin/" : "../local/bin/";
                 char *sym_dest = d99_xasprintf("%s%s", dest_prefix, tools[i].our_bin);
@@ -126,8 +132,10 @@ static void ensure_tool_symlinks(const char *root)
                 (void)!symlink(sym_dest, target);
                 free(sym_dest);
             }
-            free(our_file);
-            free(our_check);
+            free(our_local_file);
+            free(our_local_bin);
+            free(our_usr_file);
+            free(our_usr_bin);
             free(target);
         }
         free(backup_full);

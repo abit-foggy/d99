@@ -40,6 +40,36 @@ Description: Debian packaging toolchain in C99 (Stable)
  d99 is a lightweight Debian packaging toolchain implemented in C99,
  superseding standard dpkg, apt, dpkg-dev, and apt-utils.
 EOF
+cat > "${STAGE_DIR}/DEBIAN/postinst" <<'EOF'
+#!/bin/sh
+set -e
+
+# Link standard tools in /usr/bin to d99 implementations
+for tool in apt:d99-solve apt-get:d99-solve dpkg:d99-inst dpkg-deb:d99-deb dpkg-query:d99-query; do
+    src="${tool%%:*}"
+    dst="${tool##*:}"
+    
+    # If standard tool exists and is not a symlink, back it up to .upstream
+    if [ -e "/usr/bin/${src}" ] && [ ! -L "/usr/bin/${src}" ]; then
+        if [ ! -e "/usr/bin/${src}.upstream" ]; then
+            mv "/usr/bin/${src}" "/usr/bin/${src}.upstream"
+        else
+            rm -f "/usr/bin/${src}"
+        fi
+    fi
+    
+    # Ensure /usr/bin/<tool> points to d99 implementation
+    ln -sf "${dst}" "/usr/bin/${src}"
+done
+
+# If stale /usr/local/bin copies exist, update or link them so they don't shadow /usr/bin
+for bin in d99-build d99-deb d99-inst d99-query d99-solve; do
+    if [ -e "/usr/local/bin/${bin}" ] || [ -L "/usr/local/bin/${bin}" ]; then
+        ln -sf "/usr/bin/${bin}" "/usr/local/bin/${bin}"
+    fi
+done
+EOF
+chmod 0755 "${STAGE_DIR}/DEBIAN/postinst"
 dpkg-deb -b "${STAGE_DIR}" "${REPO_DIR}/pool/main/d/d99/d99_${STABLE_VER}-1_amd64.deb"
 rm -rf "${STAGE_DIR}"
 
@@ -68,6 +98,36 @@ Description: Debian packaging toolchain in C99 (Nightly)
  superseding standard dpkg, apt, dpkg-dev, and apt-utils.
  Nightly builds track main development snapshots and out-version stable.
 EOF
+cat > "${STAGE_DIR}/DEBIAN/postinst" <<'EOF'
+#!/bin/sh
+set -e
+
+# Link standard tools in /usr/bin to d99 implementations
+for tool in apt:d99-solve apt-get:d99-solve dpkg:d99-inst dpkg-deb:d99-deb dpkg-query:d99-query; do
+    src="${tool%%:*}"
+    dst="${tool##*:}"
+    
+    # If standard tool exists and is not a symlink, back it up to .upstream
+    if [ -e "/usr/bin/${src}" ] && [ ! -L "/usr/bin/${src}" ]; then
+        if [ ! -e "/usr/bin/${src}.upstream" ]; then
+            mv "/usr/bin/${src}" "/usr/bin/${src}.upstream"
+        else
+            rm -f "/usr/bin/${src}"
+        fi
+    fi
+    
+    # Ensure /usr/bin/<tool> points to d99 implementation
+    ln -sf "${dst}" "/usr/bin/${src}"
+done
+
+# If stale /usr/local/bin copies exist, update or link them so they don't shadow /usr/bin
+for bin in d99-build d99-deb d99-inst d99-query d99-solve; do
+    if [ -e "/usr/local/bin/${bin}" ] || [ -L "/usr/local/bin/${bin}" ]; then
+        ln -sf "/usr/bin/${bin}" "/usr/local/bin/${bin}"
+    fi
+done
+EOF
+chmod 0755 "${STAGE_DIR}/DEBIAN/postinst"
 dpkg-deb -b "${STAGE_DIR}" "${REPO_DIR}/pool/main/d/d99/d99-nightly_${NIGHTLY_VER}_amd64.deb"
 rm -rf "${STAGE_DIR}"
 
