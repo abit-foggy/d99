@@ -205,7 +205,16 @@ d99_decomp *d99_decomp_open(const char *path)
         size = (long long)st.st_size;
     else
         size = 1 << 30;
-    d = d99_decomp_open_region(f, 0, size, -1);
+    int fmt = -1;
+    size_t plen = strlen(path);
+    if (plen >= 3 && strcmp(path + plen - 3, ".xz") == 0)
+        fmt = D99_CFMT_XZ;
+    else if (plen >= 4 && strcmp(path + plen - 4, ".zst") == 0)
+        fmt = D99_CFMT_ZST;
+    else if (plen >= 3 && strcmp(path + plen - 3, ".gz") == 0)
+        fmt = D99_CFMT_GZ;
+
+    d = d99_decomp_open_region(f, 0, size, fmt);
     if (!d)
         fclose(f);
     else {

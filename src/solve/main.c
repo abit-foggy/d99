@@ -52,11 +52,14 @@ static void parse_sources_file(const char *path, source_entry **v, size_t *n,
         const char *eol = strchr(p, '\n');
         size_t ln = eol ? (size_t)(eol - p) : strlen(p);
         char *line = d99_xstrndup(p, ln);
+        char *hash = strchr(line, '#');
+        if (hash)
+            *hash = '\0';
         char *t = d99_trim(line);
         char *save = NULL;
         char *tok;
 
-        if (*t && *t != '#') {
+        if (*t) {
             tok = strtok_r(t, " \t", &save);
             if (tok && strcmp(tok, "deb") == 0) {
                 tok = strtok_r(NULL, " \t", &save);
@@ -140,39 +143,110 @@ static void free_sources(source_entry *v, size_t n)
 
 /* ==================== update ==================== */
 
-static int fetch_index(const char *base, const char *repo_root,
-                       const char *lists_dir, FILE *mf)
+struct fetch_job {
+    char *url;
+    char *dest;
+    char *name;
+    char *repo_root;
+    int is_required;
+    int status; /* -1 = unstarted, 0 = fresh, 1 = hit, 2 = failed */
+    pid_t pid;
+};
+
+static void run_parallel_fetch(struct fetch_job *jobs, size_t njobs, int max_concurrency)
 {
-    static const char *suffixes[] = { ".xz", ".zst", ".gz", "" };
-    int s;
+    size_t next = 0;
+    int running = 0;
+    if (max_concurrency < 1) max_concurrency = 1;
+    if (max_concurrency > 8) max_concurrency = 8;
 
-    for (s = 0; s < 4; s++) {
-        char *url, *dest, name[128], hex[17];
-        uint64_t h;
-
-        if (s == 0 && !d99_comp_support(D99_CFMT_XZ))
-            continue;
-        if (s == 1 && !d99_comp_support(D99_CFMT_ZST))
-            continue;
-        if (s == 2 && !d99_comp_support(D99_CFMT_GZ))
-            continue;
-        url = d99_xasprintf("%s/Packages%s", base, suffixes[s]);
-        h = d99_fnv1a64_str(url);
-        snprintf(hex, sizeof hex, "%016llx", (unsigned long long)h);
-        snprintf(name, sizeof name, "d99_%s_Packages%s", hex, suffixes[s]);
-        dest = d99_path_join(lists_dir, name);
-        d99_verbose("fetching %s", url);
-        if (d99_fetch(url, dest, 1) == 0) {
-            printf("Get: %s\n", url);
-            fprintf(mf, "%s\t%s\n", name, repo_root);
-            free(dest);
-            free(url);
-            return 0;
+    while (next < njobs || running > 0) {
+        while (running < max_concurrency && next < njobs) {
+            size_t idx = next++;
+            pid_t pid = fork();
+            if (pid < 0) {
+                int rc = d99_fetch(jobs[idx].url, jobs[idx].dest, 1);
+                jobs[idx].status = (rc == 0) ? 0 : ((rc == 1) ? 1 : 2);
+                if (jobs[idx].status == 1)
+                    printf("Hit: %s\n", jobs[idx].url);
+                else if (jobs[idx].status == 0)
+                    printf("Get: %s\n", jobs[idx].url);
+            } else if (pid == 0) {
+                int rc = d99_fetch(jobs[idx].url, jobs[idx].dest, 1);
+                _exit(rc == 0 ? 0 : (rc == 1 ? 1 : 2));
+            } else {
+                jobs[idx].pid = pid;
+                running++;
+            }
         }
-        free(dest);
-        free(url);
+        if (running > 0) {
+            int status = 0;
+            pid_t done = waitpid(-1, &status, 0);
+            if (done > 0) {
+                running--;
+                size_t i;
+                for (i = 0; i < next; i++) {
+                    if (jobs[i].pid == done) {
+                        jobs[i].pid = 0;
+                        if (WIFEXITED(status)) {
+                            int code = WEXITSTATUS(status);
+                            jobs[i].status = code;
+                            if (code == 1)
+                                printf("Hit: %s\n", jobs[i].url);
+                            else if (code == 0)
+                                printf("Get: %s\n", jobs[i].url);
+                        } else {
+                            jobs[i].status = 2;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
     }
-    return -1;
+}
+
+static const char *pick_package_ext(const char *uri, const char *suite, const char *rel_base, const char *rel_text)
+{
+    static const char *exts[] = { ".xz", ".zst", ".gz", "" };
+    int i;
+    if (rel_text) {
+        for (i = 0; i < 4; i++) {
+            if (strcmp(exts[i], ".xz") == 0 && !d99_comp_support(D99_CFMT_XZ)) continue;
+            if (strcmp(exts[i], ".zst") == 0 && !d99_comp_support(D99_CFMT_ZST)) continue;
+            if (strcmp(exts[i], ".gz") == 0 && !d99_comp_support(D99_CFMT_GZ)) continue;
+
+            char *needle = (*rel_base) ? d99_xasprintf("%s/Packages%s", rel_base, exts[i])
+                                       : d99_xasprintf("Packages%s", exts[i]);
+            int found = (strstr(rel_text, needle) != NULL);
+            free(needle);
+            if (found)
+                return exts[i];
+        }
+        return NULL;
+    }
+
+    /* Fallback if no Release file exists */
+    if (strncmp(uri, "file://", 7) == 0) {
+        const char *p = uri + 7;
+        if (strncmp(p, "localhost/", 10) == 0)
+            p += 9;
+        for (i = 0; i < 4; i++) {
+            char *full;
+            int exists;
+            if (!suite || strcmp(suite, "./") == 0) {
+                full = (*rel_base) ? d99_xasprintf("%s/%s/Packages%s", p, rel_base, exts[i])
+                                   : d99_xasprintf("%s/Packages%s", p, exts[i]);
+            } else {
+                full = d99_xasprintf("%s/dists/%s/%s/Packages%s", p, suite, rel_base, exts[i]);
+            }
+            exists = d99_file_exists(full);
+            free(full);
+            if (exists)
+                return exts[i];
+        }
+    }
+    return NULL;
 }
 
 static int cmd_update(paths *p, const char *arch)
@@ -181,58 +255,206 @@ static int cmd_update(paths *p, const char *arch)
     size_t nents, i, c;
     char *manifest;
     FILE *mf;
+    struct fetch_job *rel_jobs;
+    char **rel_texts;
+    struct fetch_job *pkg_jobs = NULL;
+    size_t n_pkg = 0, cap_pkg = 0;
+    size_t fresh_downloads = 0;
 
     d99_mkdir_p(p->lists_dir, 0755);
     ents = parse_all_sources(p, &nents);
     if (nents == 0) {
-        fprintf(stderr, "d99-solve: no usable deb entries (checked %s and "
-                "%s)\n", p->sources_file, p->sources_dir);
+        fprintf(stderr, "d99-solve: no usable deb entries (checked %s and %s)\n",
+                p->sources_file, p->sources_dir);
         return 1;
     }
+
+    /* 1. Fetch Release files in parallel */
+    rel_jobs = d99_xcalloc(nents, sizeof(*rel_jobs));
+    rel_texts = d99_xcalloc(nents, sizeof(char *));
+
+    for (i = 0; i < nents; i++) {
+        source_entry *e = &ents[i];
+        int flat = (e->comps.n == 0) || (e->suite && strcmp(e->suite, "./") == 0);
+        char hex[17];
+        uint64_t h;
+        char *rel_name;
+
+        if (flat)
+            rel_jobs[i].url = d99_xasprintf("%s/Release", e->uri);
+        else
+            rel_jobs[i].url = d99_xasprintf("%s/dists/%s/Release", e->uri, e->suite);
+
+        h = d99_fnv1a64_str(rel_jobs[i].url);
+        snprintf(hex, sizeof hex, "%016llx", (unsigned long long)h);
+        rel_name = d99_xasprintf("d99_rel_%s", hex);
+        rel_jobs[i].dest = d99_path_join(p->lists_dir, rel_name);
+        free(rel_name);
+        rel_jobs[i].status = -1;
+    }
+
+    run_parallel_fetch(rel_jobs, nents, 8);
+
+    for (i = 0; i < nents; i++) {
+        if (rel_jobs[i].status == 0 || rel_jobs[i].status == 1) {
+            size_t rlen = 0;
+            rel_texts[i] = d99_read_file(rel_jobs[i].dest, &rlen);
+        }
+    }
+
+    /* 2. Build list of Packages download jobs */
+    for (i = 0; i < nents; i++) {
+        source_entry *e = &ents[i];
+        int flat = (e->comps.n == 0) || (e->suite && strcmp(e->suite, "./") == 0);
+        const char *rel_txt = rel_texts[i];
+
+        if (flat) {
+            const char *ext = pick_package_ext(e->uri, e->suite, "", rel_txt);
+            if (!ext && !rel_txt)
+                ext = d99_comp_support(D99_CFMT_GZ) ? ".gz" : "";
+            if (ext) {
+                char hex[17], name[128];
+                char *url = d99_xasprintf("%s/Packages%s", e->uri, ext);
+                uint64_t h = d99_fnv1a64_str(url);
+                snprintf(hex, sizeof hex, "%016llx", (unsigned long long)h);
+                snprintf(name, sizeof name, "d99_%s_Packages%s", hex, ext);
+
+                if (n_pkg == cap_pkg) {
+                    cap_pkg = cap_pkg ? cap_pkg * 2 : 16;
+                    pkg_jobs = d99_xrealloc(pkg_jobs, cap_pkg * sizeof(*pkg_jobs));
+                }
+                pkg_jobs[n_pkg].url = url;
+                pkg_jobs[n_pkg].dest = d99_path_join(p->lists_dir, name);
+                pkg_jobs[n_pkg].name = d99_xstrdup(name);
+                pkg_jobs[n_pkg].repo_root = d99_xstrdup(e->uri);
+                pkg_jobs[n_pkg].is_required = 1;
+                pkg_jobs[n_pkg].status = -1;
+                n_pkg++;
+            }
+        } else {
+            for (c = 0; c < e->comps.n; c++) {
+                char *rel_base = d99_xasprintf("%s/binary-%s", e->comps.v[c], arch);
+                const char *ext = pick_package_ext(e->uri, e->suite, rel_base, rel_txt);
+                if (!ext && !rel_txt)
+                    ext = d99_comp_support(D99_CFMT_XZ) ? ".xz" : (d99_comp_support(D99_CFMT_GZ) ? ".gz" : "");
+
+                if (ext) {
+                    char hex[17], name[128];
+                    char *url = d99_xasprintf("%s/dists/%s/%s/binary-%s/Packages%s",
+                                              e->uri, e->suite, e->comps.v[c], arch, ext);
+                    uint64_t h = d99_fnv1a64_str(url);
+                    snprintf(hex, sizeof hex, "%016llx", (unsigned long long)h);
+                    snprintf(name, sizeof name, "d99_%s_Packages%s", hex, ext);
+
+                    if (n_pkg == cap_pkg) {
+                        cap_pkg = cap_pkg ? cap_pkg * 2 : 16;
+                        pkg_jobs = d99_xrealloc(pkg_jobs, cap_pkg * sizeof(*pkg_jobs));
+                    }
+                    pkg_jobs[n_pkg].url = url;
+                    pkg_jobs[n_pkg].dest = d99_path_join(p->lists_dir, name);
+                    pkg_jobs[n_pkg].name = d99_xstrdup(name);
+                    pkg_jobs[n_pkg].repo_root = d99_xstrdup(e->uri);
+                    pkg_jobs[n_pkg].is_required = 1;
+                    pkg_jobs[n_pkg].status = -1;
+                    n_pkg++;
+                }
+                free(rel_base);
+
+                /* Only check binary-all if Release explicitly lists it */
+                if (strcmp(arch, "all") != 0 && rel_txt) {
+                    char *rel_base_all = d99_xasprintf("%s/binary-all", e->comps.v[c]);
+                    const char *ext_all = pick_package_ext(e->uri, e->suite, rel_base_all, rel_txt);
+                    if (ext_all) {
+                        char hex[17], name[128];
+                        char *url = d99_xasprintf("%s/dists/%s/%s/binary-all/Packages%s",
+                                                  e->uri, e->suite, e->comps.v[c], ext_all);
+                        uint64_t h = d99_fnv1a64_str(url);
+                        snprintf(hex, sizeof hex, "%016llx", (unsigned long long)h);
+                        snprintf(name, sizeof name, "d99_%s_Packages%s", hex, ext_all);
+
+                        if (n_pkg == cap_pkg) {
+                            cap_pkg = cap_pkg ? cap_pkg * 2 : 16;
+                            pkg_jobs = d99_xrealloc(pkg_jobs, cap_pkg * sizeof(*pkg_jobs));
+                        }
+                        pkg_jobs[n_pkg].url = url;
+                        pkg_jobs[n_pkg].dest = d99_path_join(p->lists_dir, name);
+                        pkg_jobs[n_pkg].name = d99_xstrdup(name);
+                        pkg_jobs[n_pkg].repo_root = d99_xstrdup(e->uri);
+                        pkg_jobs[n_pkg].is_required = 0;
+                        pkg_jobs[n_pkg].status = -1;
+                        n_pkg++;
+                    }
+                    free(rel_base_all);
+                }
+            }
+        }
+    }
+
+    /* 3. Run parallel fetch on all Packages files */
+    run_parallel_fetch(pkg_jobs, n_pkg, 8);
+
+    /* 4. Write manifest and count changes */
     manifest = d99_path_join(p->lists_dir, "d99_manifest");
     mf = fopen(manifest, "wb");
     if (!mf) {
         fprintf(stderr, "d99-solve: cannot write %s\n", manifest);
+        for (i = 0; i < n_pkg; i++) {
+            free(pkg_jobs[i].url);
+            free(pkg_jobs[i].dest);
+            free(pkg_jobs[i].name);
+            free(pkg_jobs[i].repo_root);
+        }
+        free(pkg_jobs);
+        for (i = 0; i < nents; i++) {
+            free(rel_jobs[i].url);
+            free(rel_jobs[i].dest);
+            free(rel_texts[i]);
+        }
+        free(rel_jobs);
+        free(rel_texts);
         free_sources(ents, nents);
+        free(manifest);
         return 1;
     }
 
-    for (i = 0; i < nents; i++) {
-        source_entry *e = &ents[i];
-        int flat = (e->comps.n == 0) ||
-                  (e->suite && strcmp(e->suite, "./") == 0);
-        int any = 0;
-
-        if (flat) {
-            if (fetch_index(e->uri, e->uri, p->lists_dir, mf) == 0)
-                any = 1;
-        } else {
-            for (c = 0; c < e->comps.n; c++) {
-                char *base = d99_xasprintf("%s/dists/%s/%s/binary-%s",
-                                           e->uri, e->suite, e->comps.v[c],
-                                           arch);
-                if (fetch_index(base, e->uri, p->lists_dir, mf) == 0)
-                    any = 1;
-                free(base);
-
-                if (strcmp(arch, "all") != 0) {
-                    char *base_all = d99_xasprintf("%s/dists/%s/%s/binary-all",
-                                                   e->uri, e->suite, e->comps.v[c]);
-                    if (fetch_index(base_all, e->uri, p->lists_dir, mf) == 0)
-                        any = 1;
-                    free(base_all);
-                }
-            }
+    for (i = 0; i < n_pkg; i++) {
+        if (pkg_jobs[i].status == 0 || pkg_jobs[i].status == 1) {
+            fprintf(mf, "%s\t%s\n", pkg_jobs[i].name, pkg_jobs[i].repo_root);
+            if (pkg_jobs[i].status == 0)
+                fresh_downloads++;
+        } else if (pkg_jobs[i].is_required) {
+            fprintf(stderr, "d99-solve: failed to fetch %s\n", pkg_jobs[i].url);
         }
-        if (!any)
-            fprintf(stderr, "d99-solve: no Packages index found for %s\n",
-                    e->uri);
     }
     fclose(mf);
     chmod(manifest, 0644);
     free(manifest);
+
+    for (i = 0; i < n_pkg; i++) {
+        free(pkg_jobs[i].url);
+        free(pkg_jobs[i].dest);
+        free(pkg_jobs[i].name);
+        free(pkg_jobs[i].repo_root);
+    }
+    free(pkg_jobs);
+
+    for (i = 0; i < nents; i++) {
+        free(rel_jobs[i].url);
+        free(rel_jobs[i].dest);
+        free(rel_texts[i]);
+    }
+    free(rel_jobs);
+    free(rel_texts);
     free_sources(ents, nents);
-    repo_build_index(p->lists_dir);
+
+    {
+        char *idx_file = d99_path_join(p->lists_dir, "repo_index.bin");
+        int need_rebuild = (fresh_downloads > 0) || !d99_file_exists(idx_file);
+        free(idx_file);
+
+        if (need_rebuild)
+            repo_build_index(p->lists_dir);
+    }
     printf("d99-solve: index update complete\n");
     return 0;
 }

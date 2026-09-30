@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #define FETCH_MAX_REDIRECTS 8
@@ -254,13 +255,24 @@ static int http_get(const char *url, const char *dest, int depth, int quiet)
         return -1;
     }
 
+    struct stat dst_st;
+    char ims_hdr[128] = "";
+    if (stat(dest, &dst_st) == 0 && dst_st.st_size > 0) {
+        struct tm tm;
+        gmtime_r(&dst_st.st_mtime, &tm);
+        char date_buf[64];
+        strftime(date_buf, sizeof date_buf, "%a, %d %b %Y %H:%M:%S GMT", &tm);
+        snprintf(ims_hdr, sizeof ims_hdr, "If-Modified-Since: %s\r\n", date_buf);
+    }
+
     snprintf(req, sizeof req,
              "GET %s HTTP/1.1\r\n"
              "Host: %s\r\n"
              "User-Agent: d99-solve/%s\r\n"
              "Accept: */*\r\n"
+             "%s"
              "Connection: close\r\n"
-             "\r\n", path, host, D99_VERSION);
+             "\r\n", path, host, D99_VERSION, ims_hdr);
     fputs(req, in);
     fflush(in);
 
@@ -299,6 +311,12 @@ static int http_get(const char *url, const char *dest, int depth, int quiet)
         free(next);
         return rc;
     }
+    if (code == 304) {
+        /* Not Modified (cache hit) */
+        fclose(in);
+        free(location);
+        return 1;
+    }
     if (code != 200) {
         if (!quiet)
             fprintf(stderr, "d99-solve: HTTP %d fetching %s\n", code, url);
@@ -322,6 +340,8 @@ static int fetch_https(const char *url, const char *dest, int quiet)
     int fd;
     pid_t pid;
     int status;
+    struct stat st;
+    int has_dest = (stat(dest, &st) == 0 && st.st_size > 0);
 
     snprintf(tmpl, sizeof tmpl, "%s/.d99fetch.XXXXXX", dir ? dir : ".");
     free(dir);
@@ -344,13 +364,23 @@ static int fetch_https(const char *url, const char *dest, int quiet)
                 close(devnull);
             }
         }
-        execlp("curl", "curl", "-fsSL", "--retry", "2", "-o", tmpl, url, (char *)NULL);
-        execlp("wget", "wget", "-q", "-O", tmpl, url, (char *)NULL);
+        if (has_dest)
+            execlp("curl", "curl", "-fsSL", "-z", dest, "-o", tmpl, url, (char *)NULL);
+        else
+            execlp("curl", "curl", "-fsSL", "-o", tmpl, url, (char *)NULL);
+        execlp("wget", "wget", "-q", "-N", "-O", tmpl, url, (char *)NULL);
         _exit(127);
     }
     if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         unlink(tmpl);
         return -1;
+    }
+    if (has_dest) {
+        struct stat tmp_st;
+        if (stat(tmpl, &tmp_st) != 0 || tmp_st.st_size == 0) {
+            unlink(tmpl);
+            return 1; /* Not modified (cache hit) */
+        }
     }
     if (rename(tmpl, dest) != 0) {
         unlink(tmpl);
@@ -366,6 +396,11 @@ int d99_fetch(const char *url, const char *dest, int quiet)
         /* file://localhost/path and file:///path */
         if (strncmp(src, "localhost/", 10) == 0)
             src += 9;
+        struct stat st_src, st_dst;
+        if (stat(src, &st_src) == 0 && stat(dest, &st_dst) == 0) {
+            if (st_src.st_mtime <= st_dst.st_mtime && st_src.st_size == st_dst.st_size)
+                return 1; /* Cache hit */
+        }
         if (copy_file(src, dest) != 0) {
             if (!quiet)
                 fprintf(stderr, "d99-solve: cannot copy file://%s\n", src);
