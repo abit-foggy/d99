@@ -1,3 +1,19 @@
+Package: d99-nightly
+Architecture: all
+Version: 999.0.0+nightly.0f614ec
+Priority: optional
+Section: utils
+Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
+Depends: d99 (= 999.0.0+nightly.0f614ec)
+Filename: pool/main/d/d99/d99-nightly_999.0.0+nightly.0f614ec_all.deb
+Size: 606
+MD5sum: 0e1d731202e8fc125d26e0d686a11a94
+SHA1: ea35913c34d0d8b21859a86612abbfb9959759d6
+SHA256: 7a293721ee9eb087834e049873f0949fd1d5a186b45715bcaa302c4cb606cc76
+SHA512: e76e4db13d5e3cca1fec02734c39aa095b2ccc26942a3f369d6f57c354399d4fc25567c3fb3c09baad69d33749cb5b8f9e253ddfbf00e941001f7ce4f4c4ea6c
+Description: Debian packaging toolchain in C99 (Nightly tracking package)
+ Metapackage depending on the latest d99 nightly snapshot build.
+
 Package: d99
 Architecture: amd64
 Version: 0.1.0-1
@@ -7,27 +23,28 @@ Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
 Depends: libc6, zlib1g, liblzma5, libzstd1
 Filename: pool/main/d/d99/d99_0.1.0-1_amd64.deb
 Size: 424448
-MD5sum: e19766339b8e0b4d1ef314aa8f599b9e
-SHA1: 4049b71623f287924e3e370a88b6debb213ca088
-SHA256: f78a4772807e3dd723f4e0b4f9b5ea546c32209b7d5cbd11262eb64a9d0c6ea2
-SHA512: 2f5d4ec4567b1f29ff9fe493d29ab1829d36fc5b1944190110f4d58e321789a01cb15e6038a0b861fb6502ccb1862c1e70210613089460f4f36f9ba9f596b65d
+MD5sum: 975e2a75ebe7125766bbc62929c33ccd
+SHA1: 16c4355e856795af6d1be9a48a3e5198bcfce459
+SHA256: 8f0ee01a3d9dba6fc73c8010f7ba761048d9936e34efb5da5cefe4aedf1ac8be
+SHA512: e28aae30463fa098efff6a8c003916fbd66348938522698eea3f5d8bff5a819c441317714df016b0ec0700a5e258ff8c57a24cbd370fe600d6693901a5e6279e
 Description: Debian packaging toolchain in C99
  d99 is a lightweight Debian packaging toolchain implemented in C99,
  providing d99-deb, d99-query, d99-inst, d99-solve, and d99-build.
 
 Package: d99
 Architecture: amd64
-Version: 999.0.0+nightly.e769cf2
+Version: 999.0.0+nightly.0f614ec
 Priority: optional
 Section: utils
 Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
+Provides: d99-nightly
 Depends: libc6, zlib1g, liblzma5, libzstd1
-Filename: pool/main/d/d99/d99_999.0.0+nightly.e769cf2_amd64.deb
-Size: 424694
-MD5sum: cf73cca86b184373821169a2fa4b185a
-SHA1: 410109cd7128d46fba425f2128e854fca9b8bae3
-SHA256: 094b903e6f71ec5d60eedbbd58db66bae58bedbf1bcacc942ef7181909323ed3
-SHA512: fdae5d23cc60e26ae4d4f8e8315a4674eda6e1501d67eb5fc2f2dff65d37db6e448a62f4ae058ce7e006276ee13ec645b6c36690f3098c81b35a643b3cd8d937
+Filename: pool/main/d/d99/d99_999.0.0+nightly.0f614ec_amd64.deb
+Size: 424600
+MD5sum: 107136d582d4281d6593efa0ebfb9c41
+SHA1: 02a7cfd0a1558d6dcdacd6a9e2cfaf773eaeb890
+SHA256: d0fc2460b9bc285bdeb86251270e246ce9e5204b9fd6da3969a24b04a38e3716
+SHA512: 1de80c60aeec50bd6deadca4c0fb1654a15efd36767e2de9445ba6cb8362b9aff28ff723b8ef3f5a2bd5503d9e4dca2f700f768102154ef187286c3827eaa5c4
 Description: Debian packaging toolchain in C99 (Nightly snapshot)
  d99 is a lightweight Debian packaging toolchain implemented in C99,
  providing d99-deb, d99-query, d99-inst, d99-solve, and d99-build.
