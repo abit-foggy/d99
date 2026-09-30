@@ -32,9 +32,11 @@ Priority: optional
 Architecture: amd64
 Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
 Depends: libc6, zlib1g, liblzma5, libzstd1
+Provides: dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0)
+Replaces: dpkg, apt, dpkg-dev, apt-utils
 Description: Debian packaging toolchain in C99
  d99 is a lightweight Debian packaging toolchain implemented in C99,
- providing d99-deb, d99-query, d99-inst, d99-solve, and d99-build.
+ superseding standard dpkg, apt, dpkg-dev, and apt-utils.
 EOF
 dpkg-deb -b "${STAGE_DIR}" "${REPO_DIR}/pool/main/d/d99/d99_0.1.0-1_amd64.deb"
 rm -rf "${STAGE_DIR}"
@@ -56,10 +58,11 @@ Priority: optional
 Architecture: amd64
 Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
 Depends: libc6, zlib1g, liblzma5, libzstd1
-Provides: d99-nightly
+Provides: dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0), d99-nightly
+Replaces: dpkg, apt, dpkg-dev, apt-utils
 Description: Debian packaging toolchain in C99 (Nightly snapshot)
  d99 is a lightweight Debian packaging toolchain implemented in C99,
- providing d99-deb, d99-query, d99-inst, d99-solve, and d99-build.
+ superseding standard dpkg, apt, dpkg-dev, and apt-utils.
  Nightly builds track main development snapshots and out-version stable.
 EOF
 dpkg-deb -b "${STAGE_DIR}" "${REPO_DIR}/pool/main/d/d99/d99_${NIGHTLY_VER}_amd64.deb"
@@ -77,6 +80,8 @@ Priority: optional
 Architecture: all
 Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
 Depends: d99 (= ${NIGHTLY_VER})
+Provides: dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0)
+Replaces: dpkg, apt, dpkg-dev, apt-utils
 Description: Debian packaging toolchain in C99 (Nightly tracking package)
  Metapackage depending on the latest d99 nightly snapshot build.
 EOF

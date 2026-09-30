@@ -362,7 +362,10 @@ static int installed_deps_satisfied(d99_db *db, d99_pkg *p)
                     d99_pkg *cand_pkg = d99_db_at(db, pidx);
                     if (cand_pkg->state != D99_PS_INSTALLED)
                         continue;
-                    if (strcmp(cand_pkg->name, alt->name) == 0 &&
+                    if ((strcmp(cand_pkg->name, alt->name) == 0 ||
+                         (strcmp(cand_pkg->name, "d99") == 0 &&
+                          (strcmp(alt->name, "dpkg") == 0 || strcmp(alt->name, "apt") == 0 ||
+                           strcmp(alt->name, "dpkg-dev") == 0 || strcmp(alt->name, "apt-utils") == 0))) &&
                         (alt->op == D99_DEP_NONE || !alt->ver ||
                          d99_verrel(d99_vercmp(cand_pkg->version, alt->ver), alt->op))) {
                         group_sat = 1;
@@ -728,6 +731,10 @@ static int plan_install(const char *cmd_name, paths *p, struct target_spec *targ
         struct target_spec *t = &targets[i];
         d99_cand *c = repo_find(repo, t->name, t->op, t->ver);
         d99_pkg *inst = d99_db_find(db, t->name);
+        if (!inst && (strcmp(t->name, "dpkg") == 0 || strcmp(t->name, "apt") == 0 ||
+                      strcmp(t->name, "dpkg-dev") == 0 || strcmp(t->name, "apt-utils") == 0)) {
+            inst = d99_db_find(db, "d99");
+        }
         pnode *rnode = NULL;
 
         if (!c) {

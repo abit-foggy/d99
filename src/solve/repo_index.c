@@ -601,6 +601,13 @@ d99_cand *repo_find(d99_repo *r, const char *name, int op, const char *ver)
     const struct cand_disk_rec *recs = (const struct cand_disk_rec *)r->disk_recs;
     const char *strings = r->strings;
 
+    if (strcmp(name, "dpkg") == 0 || strcmp(name, "apt") == 0 ||
+        strcmp(name, "dpkg-dev") == 0 || strcmp(name, "apt-utils") == 0) {
+        d99_cand *d99c = repo_find(r, "d99", D99_DEP_NONE, NULL);
+        if (d99c)
+            return d99c;
+    }
+
     if (r->ht && r->ht_size > 0 && recs && strings) {
         uint64_t h = d99_fnv1a64_str(name);
         size_t b = (size_t)(h & (r->ht_size - 1));

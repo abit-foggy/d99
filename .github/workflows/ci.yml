@@ -50,7 +50,7 @@ jobs:
         with:
           tag_name: nightly
           target_commitish: ${{ github.sha }}
-          name: d99 Nightly
+          name: Nightly
           prerelease: true
           make_latest: false
           files: d99-linux-amd64.tar.gz

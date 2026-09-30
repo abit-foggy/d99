@@ -70,32 +70,120 @@ struct mapctx {
     struct d99_ctx *c;
     const char *pkg;
     d99_strvec *conffiles;
-    char buf[8192];    /* ".dpkg-new" result */
-    char abuf[8192];   /* absolute form for diversion lookups */
+    char backup_buf[4096];
+    char new_buf[4096];
+    char abuf[4096];
 };
 
-/* Extraction callback: diversions + ".dpkg-new" conffile semantics.
+static int is_standard_tool_path(const char *abuf, const char **canonical_tool)
+{
+    const char *p = abuf;
+    if (strncmp(p, "/usr/bin/", 9) == 0)
+        p += 9;
+    else if (strncmp(p, "/bin/", 5) == 0)
+        p += 5;
+    else
+        return 0;
+
+    if (strcmp(p, "dpkg") == 0 ||
+        strcmp(p, "dpkg-deb") == 0 ||
+        strcmp(p, "dpkg-query") == 0 ||
+        strcmp(p, "apt") == 0 ||
+        strcmp(p, "apt-get") == 0) {
+        if (canonical_tool)
+            *canonical_tool = p;
+        return 1;
+    }
+    return 0;
+}
+
+static void ensure_tool_symlinks(const char *root)
+{
+    static const struct {
+        const char *tool_rel;
+        const char *our_bin;
+    } tools[] = {
+        { "usr/bin/dpkg", "d99-inst" },
+        { "usr/bin/dpkg-deb", "d99-deb" },
+        { "usr/bin/dpkg-query", "d99-query" },
+        { "usr/bin/apt", "d99-solve" },
+        { "usr/bin/apt-get", "d99-solve" },
+        { NULL, NULL }
+    };
+    int i;
+    for (i = 0; tools[i].tool_rel; i++) {
+        char *backup_rel = d99_xasprintf("%s.upstream", tools[i].tool_rel);
+        char *backup_full = d99_path_join(root, backup_rel);
+        if (d99_file_exists(backup_full)) {
+            char *target = d99_path_join(root, tools[i].tool_rel);
+            char *our_check = d99_path_join(root, "usr/local/bin");
+            char *our_file = d99_path_join(our_check, tools[i].our_bin);
+            if (d99_file_exists(our_file) || d99_file_exists(tools[i].our_bin)) {
+                const char *dest_prefix = (!root || strcmp(root, "/") == 0) ?
+                                          "/usr/local/bin/" : "../local/bin/";
+                char *sym_dest = d99_xasprintf("%s%s", dest_prefix, tools[i].our_bin);
+                unlink(target);
+                (void)!symlink(sym_dest, target);
+                free(sym_dest);
+            }
+            free(our_file);
+            free(our_check);
+            free(target);
+        }
+        free(backup_full);
+        free(backup_rel);
+    }
+}
+
+static int is_superseded_pkg(const char *name)
+{
+    return (strcmp(name, "dpkg") == 0 ||
+            strcmp(name, "apt") == 0 ||
+            strcmp(name, "dpkg-dev") == 0 ||
+            strcmp(name, "apt-utils") == 0);
+}
+
+/* Extraction callback: diversions + standard tools + ".dpkg-new" conffile semantics.
  * Tar member paths arrive normalized and relative ("usr/bin/dpkg"),
  * while /var/lib/dpkg/diversions records absolute paths
  * ("/usr/bin/dpkg"); bridge the two forms here. */
 static const char *inst_map(const char *path, int is_dir, void *ud)
 {
     struct mapctx *m = ud;
+    const char *tool = NULL;
 
     if (is_dir)
         return path;
     snprintf(m->abuf, sizeof m->abuf, "/%s", path);
     {
         const char *dv = diversions_map(m->c->div, m->abuf, m->pkg);
-        if (dv)
+        if (dv) {
             path = dv + 1;   /* back to extractor-relative form */
+        } else if (is_standard_tool_path(m->abuf, &tool)) {
+            /* Standard tool update: automatically link updates to their backup version (.upstream)
+             * If no backup version is found on disk or in diversions, then don't update. */
+            char *backup_rel = d99_xasprintf("%s.upstream", path);
+            char *backup_full = d99_path_join(m->c->root, backup_rel);
+            int backup_exists = d99_file_exists(backup_full);
+            free(backup_full);
+
+            if (backup_exists) {
+                snprintf(m->backup_buf, sizeof m->backup_buf, "%.4000s.upstream", path);
+                free(backup_rel);
+                path = m->backup_buf;
+            } else {
+                free(backup_rel);
+                fprintf(stderr, "d99-inst: standard tool '%s' has no backup version (.upstream); skipping update\n", m->abuf);
+                return NULL;
+            }
+        }
     }
     if (m->conffiles && d99_sv_contains(m->conffiles, path)) {
         char *full = d99_path_join(m->c->root, path);
         if (d99_file_exists(full)) {
-            snprintf(m->buf, sizeof m->buf, "%s.dpkg-new", path);
+            snprintf(m->new_buf, sizeof m->new_buf, "%.4000s.dpkg-new", path);
             free(full);
-            return m->buf;
+            return m->new_buf;
         }
         free(full);
     }
@@ -117,6 +205,8 @@ static int pkg_satisfies(d99_pkg *p, const d99_depalternative *alt,
 
     if (installed_only && p->state != D99_PS_INSTALLED)
         return 0;
+    if (strcmp(p->name, "d99") == 0 && is_superseded_pkg(alt->name))
+        return 1;
     if (d99_dep_alt_match(alt, p->name, p->version))
         return 1;
     for (i = 0; i < p->provides.n; i++) {
@@ -457,7 +547,8 @@ int inst_unpack_deb(struct d99_ctx *c, const char *deb,
         mc.c = c;
         mc.pkg = np->name;
         mc.conffiles = &conffiles;
-        mc.buf[0] = '\0';
+        mc.backup_buf[0] = '\0';
+        mc.new_buf[0] = '\0';
         o.map = inst_map;
         o.map_ud = &mc;
         o.record = inst_record;
@@ -479,6 +570,8 @@ int inst_unpack_deb(struct d99_ctx *c, const char *deb,
         }
         d99_verbose("unpacked %ld files for %s", n, np->name);
     }
+
+    ensure_tool_symlinks(c->root);
 
     /* write the file list */
     {
