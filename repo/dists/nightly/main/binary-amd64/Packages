@@ -1,16 +1,18 @@
 Package: d99-nightly
 Architecture: all
-Version: 999.0.0+nightly.26a4995
+Version: 999.0.0+nightly.8efef6a
 Priority: optional
 Section: utils
 Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
-Depends: d99 (= 999.0.0+nightly.26a4995)
-Filename: pool/main/d/d99/d99-nightly_999.0.0+nightly.26a4995_all.deb
-Size: 606
-MD5sum: a286ad93359eb83fc2bc693e6ba1bd5c
-SHA1: 9e8d75c9a87306dd3767a6d88d00b6c741f42eaa
-SHA256: 15c20056496de2c8f81037946c91f88d918b201d28c7d616025855a209d60177
-SHA512: 50f41206f6c0378cfd86d9c68c50a670f44ac68ecb4a3a9578b95f01c6ff6d9707fbdf974ea4f497e0c3cc408500d60ad4599dcdb0b8811ad7b597b7b6cace24
+Provides: dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0)
+Depends: d99 (= 999.0.0+nightly.8efef6a)
+Replaces: dpkg, apt, dpkg-dev, apt-utils
+Filename: pool/main/d/d99/d99-nightly_999.0.0+nightly.8efef6a_all.deb
+Size: 654
+MD5sum: ddbbf6d7a8f360bf4d889a3e2de0005c
+SHA1: d81349bc03425b0c60e300b9c18fe877714a2cc4
+SHA256: fbf58076c1beccb080d82264c9fb2716f1be42c30ce7a2652050bfac454c1019
+SHA512: bbdcb4ac0047a5268052bce8dd979553b2bd6bd41e499ba18d47b0680241db3bfaeb76f6956bca554e95d662d5f9431bc0ecf4a8a25717112852c567954f36c0
 Description: Debian packaging toolchain in C99 (Nightly tracking package)
  Metapackage depending on the latest d99 nightly snapshot build.
 
@@ -20,33 +22,36 @@ Version: 0.1.0-1
 Priority: optional
 Section: utils
 Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
+Provides: dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0)
 Depends: libc6, zlib1g, liblzma5, libzstd1
+Replaces: dpkg, apt, dpkg-dev, apt-utils
 Filename: pool/main/d/d99/d99_0.1.0-1_amd64.deb
-Size: 424444
-MD5sum: 06555b9cc7cffab1cf420de12c01926f
-SHA1: 622dcefa0618c88d05f12f13844b1f904cccd158
-SHA256: 6695997f611bce3c4056f2214e3825433b93b2131da9fe63283215c95f4d63dd
-SHA512: d38d86584a47c13b52251c8af43a82413339894275ad8cd8a54d41bd52d2986844e72ec69f6acd3f87277f0bf3583550ad1b2b094962f044be3d661352239834
+Size: 426956
+MD5sum: 3266ea24688e7f740dfd7353c4da04b4
+SHA1: 97598ddd1b00c96f1739deffa9c3fd265040c2d1
+SHA256: 69d52e33f7d2e2ff15faa5adf0e90eb64088caf9aeddd2285e4264de16d35acb
+SHA512: 0ab451dff625cb52f534c8bbd510a9c59fe8637e5eaf2ef6372dc7504180297cbdfec9234c9ffbd7a0156f424c8f367b09506330e0a651208e66a7778d6f4c61
 Description: Debian packaging toolchain in C99
  d99 is a lightweight Debian packaging toolchain implemented in C99,
- providing d99-deb, d99-query, d99-inst, d99-solve, and d99-build.
+ superseding standard dpkg, apt, dpkg-dev, and apt-utils.
 
 Package: d99
 Architecture: amd64
-Version: 999.0.0+nightly.26a4995
+Version: 999.0.0+nightly.8efef6a
 Priority: optional
 Section: utils
 Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
-Provides: d99-nightly
+Provides: dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0), d99-nightly
 Depends: libc6, zlib1g, liblzma5, libzstd1
-Filename: pool/main/d/d99/d99_999.0.0+nightly.26a4995_amd64.deb
-Size: 424596
-MD5sum: 30297029897fa1bf822267c03741afbb
-SHA1: 2ec4e28be6d50965d1e8a39d09d7fe51ce902c85
-SHA256: 0e210c8b32b6323216a1422ec1447bddabc80a560d9d82ea5144f9d7dcc15abe
-SHA512: 9c692026e7cac7c47d0767ac54bf70bc10bb9c42ca9727997f75365180e8975cdc8cab4c4ffdfca6164ff17733d022ecad0851c11fdc073e334a9c36c321c85c
+Replaces: dpkg, apt, dpkg-dev, apt-utils
+Filename: pool/main/d/d99/d99_999.0.0+nightly.8efef6a_amd64.deb
+Size: 427094
+MD5sum: 7610b3f44708a6856200c5b57ba8fed6
+SHA1: 3f85a334baf2afa1ba276e4f6aa3a50f5e3c9674
+SHA256: 1b18fcf8e20dfc523a01c728b02bf6efa8af8c955ae835d32c73c461b9f17f52
+SHA512: d038587f449cb9950dd6c78af39569e28160427af512c471e56e840d390ff7fcfcdd25f296eb90faa684e1e6928ff0ac75f0166cd3d86def80b70ae028b11730
 Description: Debian packaging toolchain in C99 (Nightly snapshot)
  d99 is a lightweight Debian packaging toolchain implemented in C99,
- providing d99-deb, d99-query, d99-inst, d99-solve, and d99-build.
+ superseding standard dpkg, apt, dpkg-dev, and apt-utils.
  Nightly builds track main development snapshots and out-version stable.
 
