@@ -5,6 +5,7 @@ bin/
 # compiled objects and libraries
 *.o
 *.a
+*.so
 
 # package artifacts
 *.deb

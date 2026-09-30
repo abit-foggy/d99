@@ -20,17 +20,14 @@
 
 /* ==================== paths ==================== */
 
-typedef struct {
-    char *root, *lists_dir, *cache_dir, *sources_file, *sources_dir, *admindir;
-    char *log_file, *backups_dir, *ext_states;
-} paths;
+static int g_json_mode = 0;
+static int g_status_fd = -1;
 
-struct action;
 static void backup_old_package(paths *p, const char *pkg_name, const char *old_ver);
 static void log_history(const char *log_path, const char *cmdline, struct action *acts, size_t nacts, int is_start);
 static void ext_states_set(const char *path, const char *pkg_name, const char *arch, int auto_installed);
 
-static void paths_init(paths *p, const char *root)
+void paths_init(paths *p, const char *root)
 {
     p->root = d99_xstrdup(root);
     p->lists_dir = d99_path_join(root, "var/lib/d99/lists");
@@ -43,7 +40,7 @@ static void paths_init(paths *p, const char *root)
     p->ext_states = d99_path_join(root, "var/lib/apt/extended_states");
 }
 
-static void paths_free(paths *p)
+void paths_free(paths *p)
 {
     free(p->root);
     free(p->lists_dir);
@@ -480,7 +477,12 @@ static int cmd_update(paths *p, const char *arch)
         if (need_rebuild)
             repo_build_index(p->lists_dir);
     }
-    printf("d99-solve: index update complete\n");
+    if (g_json_mode) {
+        printf("{\"event\":\"finish\",\"status\":\"ok\",\"fresh_downloads\":%zu}\n", fresh_downloads);
+        fflush(stdout);
+    } else {
+        printf("d99-solve: index update complete\n");
+    }
     return 0;
 }
 
@@ -643,13 +645,7 @@ static int installed_deps_satisfied(d99_db *db, d99_pkg *p)
     return 1;
 }
 
-struct target_spec {
-    char *name;
-    int op;
-    char *ver;
-};
-
-static int parse_target(const char *s, struct target_spec *t)
+int parse_target(const char *s, struct target_spec *t)
 {
     char *eq = strpbrk(s, "=<>");
 
@@ -675,13 +671,7 @@ static int parse_target(const char *s, struct target_spec *t)
     return 0;
 }
 
-typedef struct action {
-    char *name, *version, *arch;
-    char *filename, *sha256, *size, *base_uri, *summary;
-    char *old_version;   /* NULL for a fresh install */
-} action;
-
-static void free_actions(action *a, size_t n)
+void free_actions(action *a, size_t n)
 {
     size_t i;
     if (!a)
@@ -721,8 +711,8 @@ static int solve_with(d99_sat *sat, int *base, int nbase, int *bans, int nbans,
     return r;
 }
 
-static int plan_install(const char *cmd_name, paths *p, struct target_spec *targets, int ntargets,
-                        action **out_actions, size_t *out_n)
+int plan_install(const char *cmd_name, paths *p, struct target_spec *targets, int ntargets,
+                 action **out_actions, size_t *out_n)
 {
     d99_repo *repo = repo_load(p->lists_dir);
     d99_db *db = NULL;
@@ -1318,35 +1308,68 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
     char *ro = NULL;
     int all_pipelined = 0;
 
-    if (plan_install(cmd_name, p, targets, ntargets, &acts, &nacts) != 0)
+    if (g_json_mode) {
+        printf("{\"event\":\"start\",\"command\":\"install\"}\n");
+        fflush(stdout);
+    }
+
+    if (plan_install(cmd_name, p, targets, ntargets, &acts, &nacts) != 0) {
+        if (g_json_mode) {
+            printf("{\"event\":\"finish\",\"status\":\"error\",\"error\":\"resolution_failed\",\"exit_code\":1}\n");
+            fflush(stdout);
+        }
         return 1;
+    }
     if (nacts == 0) {
-        printf("d99-solve: 0 newly installed; nothing to do\n");
+        if (g_json_mode) {
+            printf("{\"event\":\"plan\",\"packages_count\":0,\"download_size\":0}\n");
+            printf("{\"event\":\"finish\",\"status\":\"ok\",\"exit_code\":0}\n");
+            fflush(stdout);
+        } else {
+            printf("d99-solve: 0 newly installed; nothing to do\n");
+        }
         free_actions(acts, nacts);
         free(inst);
         return 0;
     }
 
-    printf("The following changes will be applied:\n");
-    for (i = 0; i < nacts; i++) {
-        if (acts[i].old_version)
-            printf("  upgrade %s (%s -> %s)\n", acts[i].name,
-                   acts[i].old_version, acts[i].version);
-        else
-            printf("  install %s (%s)\n", acts[i].name, acts[i].version);
+    for (i = 0; i < nacts; i++)
         total_size += atoll(acts[i].size);
+
+    if (g_json_mode) {
+        printf("{\"event\":\"plan\",\"packages_count\":%lu,\"download_size\":%lld}\n",
+               (unsigned long)nacts, total_size);
+        fflush(stdout);
+    } else {
+        printf("The following changes will be applied:\n");
+        for (i = 0; i < nacts; i++) {
+            if (acts[i].old_version)
+                printf("  upgrade %s (%s -> %s)\n", acts[i].name,
+                       acts[i].old_version, acts[i].version);
+            else
+                printf("  install %s (%s)\n", acts[i].name, acts[i].version);
+        }
+        printf("%lu package(s), %lld bytes of archives\n",
+               (unsigned long)nacts, total_size);
     }
-    printf("%lu package(s), %lld bytes of archives\n",
-           (unsigned long)nacts, total_size);
 
     if (simulate) {
+        if (g_json_mode) {
+            printf("{\"event\":\"finish\",\"status\":\"ok\",\"exit_code\":0,\"simulated\":true}\n");
+            fflush(stdout);
+        }
         free_actions(acts, nacts);
         free(inst);
         return 0;
     }
 
     if (!print_uris && !confirm(yes)) {
-        printf("d99-solve: aborted\n");
+        if (g_json_mode) {
+            printf("{\"event\":\"finish\",\"status\":\"aborted\",\"exit_code\":1}\n");
+            fflush(stdout);
+        } else {
+            printf("d99-solve: aborted\n");
+        }
         free_actions(acts, nacts);
         free(inst);
         return 1;
@@ -1483,7 +1506,7 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
                     int status = 0;
                     pid_t done_pid = waitpid(-1, &status, WNOHANG);
                     if (done_pid == 0) {
-                        if (isatty(STDOUT_FILENO) && total_size > 0) {
+                        if (total_size > 0) {
                             long long cur_bytes = total_bytes_fetched;
                             const char *active_pkg = NULL;
                             for (w = 0; w < D99_MAX_DOWNLOAD_WORKERS; w++) {
@@ -1499,8 +1522,19 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
                             double el = (t_now.tv_sec - t_start.tv_sec) + (t_now.tv_usec - t_start.tv_usec) / 1000000.0;
                             if (el < 0.001) el = 0.001;
                             double cur_bps = cur_bytes / el;
-                            int max_dl_pct = download_only ? 100 : 50;
-                            draw_download_progress(cur_bytes, total_size, cur_bps, max_dl_pct, active_pkg);
+                            if (g_json_mode) {
+                                static struct timeval last_json_progress = {0, 0};
+                                if ((t_now.tv_sec - last_json_progress.tv_sec) * 1000000 + (t_now.tv_usec - last_json_progress.tv_usec) >= 100000) {
+                                    last_json_progress = t_now;
+                                    double pct = (double)cur_bytes * 100.0 / total_size;
+                                    printf("{\"event\":\"progress\",\"phase\":\"download\",\"item\":\"%s\",\"received\":%lld,\"total\":%lld,\"percent\":%.1f,\"speed_bps\":%.0f}\n",
+                                           active_pkg ? active_pkg : "", cur_bytes, (long long)total_size, pct, cur_bps);
+                                    fflush(stdout);
+                                }
+                            } else if (isatty(STDOUT_FILENO)) {
+                                int max_dl_pct = download_only ? 100 : 50;
+                                draw_download_progress(cur_bytes, total_size, cur_bps, max_dl_pct, active_pkg);
+                            }
                         }
                         usleep(30000);
                         continue;
@@ -1540,17 +1574,23 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
             }
 
             all_pipelined = (pipelined_unpack && uq_head == (size_t)nacts && rc == 0);
-            if (isatty(STDOUT_FILENO))
+            if (!g_json_mode && isatty(STDOUT_FILENO))
                 printf("\r\033[K");
             gettimeofday(&t_now, NULL);
             double elap = (t_now.tv_sec - t_start.tv_sec) + (t_now.tv_usec - t_start.tv_usec) / 1000000.0;
             if (elap < 0.001) elap = 0.001;
             double kbps = (total_bytes_fetched / 1024.0) / elap;
             if (total_bytes_fetched > 0) {
-                if (total_bytes_fetched >= 1048576)
-                    printf("Fetched %.1f MB in %.1fs (%.1f kB/s)\n", total_bytes_fetched / 1048576.0, elap, kbps);
-                else
-                    printf("Fetched %.1f kB in %.1fs (%.1f kB/s)\n", total_bytes_fetched / 1024.0, elap, kbps);
+                if (g_json_mode) {
+                    printf("{\"event\":\"progress\",\"phase\":\"download_complete\",\"total_bytes\":%lld,\"speed_kbps\":%.1f,\"elapsed_sec\":%.2f}\n",
+                           (long long)total_bytes_fetched, kbps, elap);
+                    fflush(stdout);
+                } else {
+                    if (total_bytes_fetched >= 1048576)
+                        printf("Fetched %.1f MB in %.1fs (%.1f kB/s)\n", total_bytes_fetched / 1048576.0, elap, kbps);
+                    else
+                        printf("Fetched %.1f kB in %.1fs (%.1f kB/s)\n", total_bytes_fetched / 1024.0, elap, kbps);
+                }
             }
             free(unpack_queue);
 
@@ -1623,7 +1663,11 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
             setenv("D99_PROGRESS_START", "0", 1);
             setenv("D99_PROGRESS_END", "100", 1);
         }
+        if (g_json_mode)
+            setenv("D99_JSON", "1", 1);
         rc = run_inst(av);
+        if (g_json_mode)
+            unsetenv("D99_JSON");
         unsetenv("D99_PROGRESS_START");
         unsetenv("D99_PROGRESS_END");
         free(av);
@@ -1632,7 +1676,7 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
     }
 
     if (rc == 0) {
-        if (isatty(STDOUT_FILENO))
+        if (!g_json_mode && isatty(STDOUT_FILENO))
             printf("\r\033[KProgress: [100%%] [########################] Complete\n");
         log_history(p->log_file, cmd_name, acts, nacts, 0);
         for (i = 0; i < nacts; i++) {
@@ -1648,6 +1692,11 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
     }
 
 out:
+    if (g_json_mode) {
+        printf("{\"event\":\"finish\",\"status\":\"%s\",\"exit_code\":%d}\n",
+               rc == 0 ? "ok" : "error", rc);
+        fflush(stdout);
+    }
     d99_sv_free(&files);
     free_actions(acts, nacts);
     free(inst);
@@ -2602,6 +2651,7 @@ static void usage(const char *cmd_name)
 "  rollback <pkg>               rollback package to previous backup\n"
 "  search <term>                search names and descriptions\n"
 "  show <pkg>                   show index details\n"
+"  api <command> [<args>...]    programmatic JSON API for other binaries\n"
 "\n"
 "Options:\n"
 "  --root=<dir>                 operate on a chroot\n"
@@ -2609,6 +2659,8 @@ static void usage(const char *cmd_name)
 "  -d|--download-only           download but do not install\n"
 "  --print-uris                 print download URIs instead of fetching\n"
 "  --arch=<arch>                override the host architecture\n"
+"  --json                       emit machine-readable JSON/NDJSON events\n"
+"  --status-fd=<fd>             send status/progress to file descriptor\n"
 "  --version | --help\n",
         cmd_name);
 }
@@ -2653,6 +2705,12 @@ int main(int argc, char **argv)
                          strcmp(a, "--recon") == 0 ||
                          strcmp(a, "--no-act") == 0)
                     simulate = 1;
+                else if (strcmp(a, "--json") == 0)
+                    g_json_mode = 1;
+                else if (strncmp(a, "--status-fd=", 12) == 0)
+                    g_status_fd = atoi(a + 12);
+                else if (strcmp(a, "--status-fd") == 0 && i + 1 < argc)
+                    g_status_fd = atoi(argv[++i]);
                 else if (strcmp(a, "--quiet") == 0)
                     ;
                 else if (strcmp(a, "--fix-broken") == 0)
@@ -2711,7 +2769,9 @@ int main(int argc, char **argv)
         arch = d99_host_arch();
 
     rc = 0;
-    if (strcmp(cmd, "update") == 0 || strcmp(cmd, "u") == 0 || strcmp(cmd, "up") == 0) {
+    if (strcmp(cmd, "api") == 0) {
+        rc = cmd_api(argv[0], cmd_name, &p, arch, (const char **)ops.v, ops.n, g_json_mode, g_status_fd);
+    } else if (strcmp(cmd, "update") == 0 || strcmp(cmd, "u") == 0 || strcmp(cmd, "up") == 0) {
         rc = cmd_update(&p, arch);
     } else if (strcmp(cmd, "install") == 0 || strcmp(cmd, "i") == 0 || strcmp(cmd, "in") == 0) {
         struct target_spec *targets;

@@ -22,9 +22,12 @@ echo "==> Building stable package (v${STABLE_VER}-1)..."
 make clean
 make VERSION="${STABLE_VER}" -j"$(nproc 2>/dev/null || echo 2)"
 STAGE_DIR="$(mktemp -d /tmp/d99-deb-stable.XXXXXX)"
-mkdir -p "${STAGE_DIR}/DEBIAN" "${STAGE_DIR}/usr/bin"
+mkdir -p "${STAGE_DIR}/DEBIAN" "${STAGE_DIR}/usr/bin" "${STAGE_DIR}/usr/lib" "${STAGE_DIR}/usr/include/d99"
 cp "${REPO_ROOT}/output/bin/"d99-* "${STAGE_DIR}/usr/bin/"
-chmod 0755 "${STAGE_DIR}/usr/bin/"*
+cp "${REPO_ROOT}/lib/libd99.so" "${STAGE_DIR}/usr/lib/"
+cp "${REPO_ROOT}/lib/include/"*.h "${STAGE_DIR}/usr/include/d99/"
+chmod 0755 "${STAGE_DIR}/usr/bin/"* "${STAGE_DIR}/usr/lib/"*.so
+chmod 0644 "${STAGE_DIR}/usr/include/d99/"*.h
 cat > "${STAGE_DIR}/DEBIAN/control" <<EOF
 Package: d99
 Version: ${STABLE_VER}-1
@@ -79,9 +82,12 @@ echo "==> Building nightly package (${NIGHTLY_VER})..."
 make clean
 make VERSION="${NIGHTLY_VER}" -j"$(nproc 2>/dev/null || echo 2)"
 STAGE_DIR="$(mktemp -d /tmp/d99-deb-nightly.XXXXXX)"
-mkdir -p "${STAGE_DIR}/DEBIAN" "${STAGE_DIR}/usr/bin"
+mkdir -p "${STAGE_DIR}/DEBIAN" "${STAGE_DIR}/usr/bin" "${STAGE_DIR}/usr/lib" "${STAGE_DIR}/usr/include/d99"
 cp "${REPO_ROOT}/output/bin/"d99-* "${STAGE_DIR}/usr/bin/"
-chmod 0755 "${STAGE_DIR}/usr/bin/"*
+cp "${REPO_ROOT}/lib/libd99.so" "${STAGE_DIR}/usr/lib/"
+cp "${REPO_ROOT}/lib/include/"*.h "${STAGE_DIR}/usr/include/d99/"
+chmod 0755 "${STAGE_DIR}/usr/bin/"* "${STAGE_DIR}/usr/lib/"*.so
+chmod 0644 "${STAGE_DIR}/usr/include/d99/"*.h
 cat > "${STAGE_DIR}/DEBIAN/control" <<EOF
 Package: d99-nightly
 Version: ${NIGHTLY_VER}

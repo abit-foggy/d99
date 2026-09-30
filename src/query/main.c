@@ -1,3 +1,4 @@
+#include "d99_api.h"
 #include "d99_archive.h"
 #include "d99_db.h"
 #include "d99_fallback.h"
@@ -7,6 +8,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static int g_json_mode = 0;
 
 static void usage(void)
 {
@@ -24,6 +27,7 @@ static void usage(void)
 "  -f|--showformat <format>    output format for -W (${Field}, \\n, \\t)\n"
 "  --admindir <dir>            package database directory\n"
 "  --rebuild                   (re)build the binary index and exit\n"
+"  --json                      output results in JSON format\n"
 "  --version | --help\n",
         stdout);
 }
@@ -156,6 +160,67 @@ static void print_list_row(const qpkg *q)
 static int cmd_list(src *s, char **pats, int npat)
 {
     size_t i;
+
+    if (g_json_mode) {
+        d99_json_buf b;
+        d99_jb_init(&b);
+        d99_jb_raw(&b, "[");
+        size_t count = 0;
+        if (s->ix) {
+            for (i = 0; i < d99_index_count(s->ix); i++) {
+                const char *pkg_name = d99_index_name(s->ix, i);
+                int match = (npat == 0);
+                for (int k = 0; k < npat && !match; k++)
+                    if (d99_glob_match(pats[k], pkg_name ? pkg_name : ""))
+                        match = 1;
+                if (!match) continue;
+                qpkg q;
+                fill_ix(&q, s->ix, i);
+                if (count > 0) d99_jb_raw(&b, ",");
+                d99_jb_raw(&b, "{\"package\":");
+                d99_jb_str(&b, q.name);
+                d99_jb_raw(&b, ",\"version\":");
+                d99_jb_str(&b, q.version);
+                d99_jb_raw(&b, ",\"architecture\":");
+                d99_jb_str(&b, q.arch);
+                d99_jb_raw(&b, ",\"status\":");
+                d99_jb_str(&b, d99_state_name(q.state));
+                d99_jb_raw(&b, ",\"summary\":");
+                d99_jb_str(&b, q.summary);
+                d99_jb_raw(&b, "}");
+                count++;
+            }
+        } else if (s->db) {
+            for (i = 0; i < d99_db_count(s->db); i++) {
+                d99_pkg *p = d99_db_at(s->db, i);
+                int match = (npat == 0);
+                for (int k = 0; k < npat && !match; k++)
+                    if (d99_glob_match(pats[k], p->name ? p->name : ""))
+                        match = 1;
+                if (!match) continue;
+                qpkg q;
+                fill_db(&q, p);
+                if (count > 0) d99_jb_raw(&b, ",");
+                d99_jb_raw(&b, "{\"package\":");
+                d99_jb_str(&b, q.name);
+                d99_jb_raw(&b, ",\"version\":");
+                d99_jb_str(&b, q.version);
+                d99_jb_raw(&b, ",\"architecture\":");
+                d99_jb_str(&b, q.arch);
+                d99_jb_raw(&b, ",\"status\":");
+                d99_jb_str(&b, d99_state_name(q.state));
+                d99_jb_raw(&b, ",\"summary\":");
+                d99_jb_str(&b, q.summary);
+                d99_jb_raw(&b, "}");
+                count++;
+            }
+        }
+        d99_jb_raw(&b, "]");
+        char *out = d99_jb_finish(&b);
+        printf("%s\n", out);
+        free(out);
+        return 0;
+    }
 
     fputs(
 "Desired=Unknown/Install/Remove/Hold/Purge\n"
@@ -486,6 +551,8 @@ int main(int argc, char **argv)
                     showformat = argv[++i];
                 } else if (strcmp(a, "--rebuild") == 0) {
                     want_rebuild = 1;
+                } else if (strcmp(a, "--json") == 0) {
+                    g_json_mode = 1;
                 } else if (strcmp(a, "--help") == 0) {
                     usage();
                     return 0;

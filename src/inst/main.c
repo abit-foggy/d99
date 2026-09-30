@@ -690,7 +690,6 @@ static int inst_configure(struct d99_ctx *c, const char *name)
 
 static void print_dpkg_progress(size_t cur, size_t total, const char *action_desc)
 {
-    if (!isatty(STDOUT_FILENO) || total == 0) return;
     int p_start = 0, p_end = 100;
     const char *env_s = getenv("D99_PROGRESS_START");
     const char *env_e = getenv("D99_PROGRESS_END");
@@ -698,8 +697,17 @@ static void print_dpkg_progress(size_t cur, size_t total, const char *action_des
     if (env_e) p_end = atoi(env_e);
     if (p_end <= p_start) p_end = 100;
 
-    int pct = p_start + (int)((cur * (p_end - p_start)) / total);
+    int pct = p_start + (int)((cur * (p_end - p_start)) / (total ? total : 1));
     if (pct > 100) pct = 100;
+
+    if (getenv("D99_JSON")) {
+        printf("{\"event\":\"progress\",\"phase\":\"dpkg\",\"action\":\"%s\",\"current\":%zu,\"total\":%zu,\"percent\":%d}\n",
+               action_desc ? action_desc : "", cur, total, pct);
+        fflush(stdout);
+        return;
+    }
+
+    if (!isatty(STDOUT_FILENO) || total == 0) return;
     int width = 24;
     int filled = (pct * width) / 100;
     printf("\r\033[KProgress: [%3d%%] [", pct);

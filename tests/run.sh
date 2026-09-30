@@ -138,6 +138,21 @@ check "solve search" sh -c \
     "\"${BIN}/d99-solve\" --root=\"${R}\" search hello-meta | grep -q metapackage"
 check "solve show" sh -c \
     "\"${BIN}/d99-solve\" --root=\"${R}\" show libhello | grep -q 'Version: 2.0-1'"
+check "query --json -l" sh -c \
+    "\"${BIN}/d99-query\" --admindir \"${R}/var/lib/dpkg\" --json -l hello-d99 | grep -q '\"package\":\"hello-d99\"'"
+check "solve api info" sh -c \
+    "\"${BIN}/d99-solve\" --root=\"${R}\" api info | grep -q '\"status\":\"ok\"'"
+check "solve api search" sh -c \
+    "\"${BIN}/d99-solve\" --root=\"${R}\" api search hello-meta | grep -q '\"status\":\"ok\"'"
+check "solve api show" sh -c \
+    "\"${BIN}/d99-solve\" --root=\"${R}\" api show libhello | grep -q '\"candidate_version\":\"2.0-1\"'"
+check "solve api plan install" sh -c \
+    "\"${BIN}/d99-solve\" --root=\"${R}\" api plan install hello-meta | grep -q '\"action\":\"install\"'"
+check "solve api rpc" sh -c \
+    "printf '{\"id\":42,\"method\":\"info\"}\n' | \"${BIN}/d99-solve\" --root=\"${R}\" api rpc | grep -q '\"id\":42'"
+check "solve install --simulate --json" sh -c \
+    "\"${BIN}/d99-solve\" --root=\"${R}\" -y install hello-meta --simulate --json | grep -q '\"simulated\":true'"
+check "libd99.so exists" test -f "${D99ROOT}/lib/libd99.so"
 
 # clean the db so the SAT solver has real work to do
 rm -rf "${R}/var/lib/dpkg" "${R}/var/cache" "${R}/var/lib/d99/lists"
