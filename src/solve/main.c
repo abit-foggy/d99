@@ -1575,6 +1575,64 @@ out:
     return rc;
 }
 
+static int cmd_upgrade(const char *argv0, const char *cmd_name, paths *p,
+                       int yes, int download_only, int print_uris, int simulate)
+{
+    d99_db *db = d99_db_load_status(p->admindir);
+    d99_repo *repo;
+    struct target_spec *targets = NULL;
+    size_t ntargets = 0, target_cap = 0;
+    size_t i;
+    int rc = 0;
+
+    if (!db) {
+        fprintf(stderr, "d99-solve: cannot load status from %s\n", p->admindir);
+        return 1;
+    }
+    repo = repo_load(p->lists_dir);
+    if (!repo) {
+        fprintf(stderr, "d99-solve: no repository lists found; run '%s update' first\n", cmd_name);
+        d99_db_free(db);
+        return 1;
+    }
+
+    for (i = 0; i < d99_db_count(db); i++) {
+        d99_pkg *pp = d99_db_at(db, i);
+        d99_cand *c;
+        if (pp->state != D99_PS_INSTALLED && pp->state != D99_PS_TRIGGERSPENDING &&
+            pp->state != D99_PS_UNPACKED)
+            continue;
+        if (pp->sel == D99_SEL_HOLD)
+            continue;
+        c = repo_find(repo, pp->name, D99_DEP_NONE, NULL);
+        if (c && c->version && pp->version && d99_vercmp(c->version, pp->version) > 0) {
+            if (ntargets == target_cap) {
+                target_cap = target_cap ? target_cap * 2 : 16;
+                targets = d99_xrealloc(targets, target_cap * sizeof(struct target_spec));
+            }
+            targets[ntargets].name = d99_xstrdup(pp->name);
+            targets[ntargets].ver = d99_xstrdup(c->version);
+            ntargets++;
+        }
+    }
+    repo_free(repo);
+    d99_db_free(db);
+
+    if (ntargets == 0) {
+        printf("All packages are up to date.\n");
+        return 0;
+    }
+
+    rc = cmd_install(argv0, cmd_name, p, targets, (int)ntargets, yes,
+                     download_only, print_uris, simulate);
+    for (i = 0; i < ntargets; i++) {
+        free(targets[i].name);
+        free(targets[i].ver);
+    }
+    free(targets);
+    return rc;
+}
+
 static int cmd_remove_purge(const char *argv0, paths *p, char **names,
                             int nnames, int purge)
 {
@@ -2452,6 +2510,8 @@ static void usage(const char *cmd_name)
 "\n"
 "Commands:\n"
 "  update                       fetch package indexes from the mirrors\n"
+"  upgrade                      upgrade all installed packages to newest versions\n"
+"  dist-upgrade | full-upgrade  upgrade packages with conflict resolution\n"
 "  install <pkg>[=<ver>]...     SAT-solve, download and install\n"
 "  remove <pkg>...              remove packages (via d99-inst)\n"
 "  purge <pkg>...               purge packages (via d99-inst)\n"
@@ -2628,6 +2688,10 @@ int main(int argc, char **argv)
             }
             free(targets);
         }
+    } else if (strcmp(cmd, "upgrade") == 0 ||
+               strcmp(cmd, "dist-upgrade") == 0 ||
+               strcmp(cmd, "full-upgrade") == 0) {
+        rc = cmd_upgrade(argv[0], cmd_name, &p, yes, download_only, print_uris, simulate);
     } else if (strcmp(cmd, "remove") == 0 || strcmp(cmd, "r") == 0 ||
                strcmp(cmd, "purge") == 0 || strcmp(cmd, "p") == 0) {
         if (ops.n == 0) {

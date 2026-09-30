@@ -159,6 +159,7 @@ check "extended_states recorded manual-install for target" sh -c \
     "grep -A2 'Package: hello-meta' '${R}/var/lib/apt/extended_states' | grep -q 'Auto-Installed: 0'"
 check "history log recorded install transaction" sh -c \
     "grep -q 'Install: hello-meta' '${R}/var/log/d99/history.log'"
+check "solve upgrade when up to date" "${BIN}/d99-solve" --root="${R}" -y upgrade
 ln -sf d99-solve "${BIN}/apt-mark"
 check "apt-mark showauto shows dependencies" sh -c \
     "\"${BIN}/apt-mark\" --root=\"${R}\" showauto | grep -q hello-d99"
