@@ -1252,6 +1252,7 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
     char **av;
     int na = 0, rc;
     char *ro = NULL;
+    int all_pipelined = 0;
 
     if (plan_install(cmd_name, p, targets, ntargets, &acts, &nacts) != 0)
         return 1;
@@ -1351,6 +1352,8 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
                         continue;
 
                     a = &acts[cur];
+                    if (isatty(STDOUT_FILENO))
+                        printf("\r\033[K");
                     printf("Get:%zu %s %s %s [%s B]\n", cur + 1, a->base_uri, a->name,
                            a->version, a->size ? a->size : "0");
                     fflush(stdout);
@@ -1407,7 +1410,37 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
 
                 if (n_running > 0 || (pipelined_unpack && unpack_pid > 0)) {
                     int status = 0;
-                    pid_t done_pid = waitpid(-1, &status, 0);
+                    pid_t done_pid = waitpid(-1, &status, WNOHANG);
+                    if (done_pid == 0) {
+                        if (isatty(STDOUT_FILENO) && total_size > 0) {
+                            long long cur_bytes = total_bytes_fetched;
+                            for (w = 0; w < D99_MAX_DOWNLOAD_WORKERS; w++) {
+                                if (workers[w].pid > 0) {
+                                    struct stat st;
+                                    if (stat(dests[workers[w].idx], &st) == 0)
+                                        cur_bytes += st.st_size;
+                                }
+                            }
+                            gettimeofday(&t_now, NULL);
+                            double el = (t_now.tv_sec - t_start.tv_sec) + (t_now.tv_usec - t_start.tv_usec) / 1000000.0;
+                            if (el < 0.001) el = 0.001;
+                            double cur_kbps = (cur_bytes / 1024.0) / el;
+                            int pct = (int)((cur_bytes * 100) / total_size);
+                            if (pct > 100) pct = 100;
+                            int width = 30;
+                            int filled = (pct * width) / 100;
+                            printf("\r\033[KProgress: [%3d%%] [", pct);
+                            for (int b = 0; b < filled; b++) putchar('#');
+                            for (int b = filled; b < width; b++) putchar('.');
+                            if (total_size >= 1048576)
+                                printf("] %.1f/%.1f MB (%.1f kB/s)\r", cur_bytes / 1048576.0, total_size / 1048576.0, cur_kbps);
+                            else
+                                printf("] %.1f/%.1f kB (%.1f kB/s)\r", cur_bytes / 1024.0, total_size / 1024.0, cur_kbps);
+                            fflush(stdout);
+                        }
+                        usleep(30000);
+                        continue;
+                    }
                     if (done_pid > 0) {
                         if (pipelined_unpack && done_pid == unpack_pid) {
                             unpack_pid = 0;
@@ -1442,6 +1475,9 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
                 }
             }
 
+            all_pipelined = (pipelined_unpack && uq_head == (size_t)nacts && rc == 0);
+            if (isatty(STDOUT_FILENO))
+                printf("\r\033[K");
             gettimeofday(&t_now, NULL);
             double elap = (t_now.tv_sec - t_start.tv_sec) + (t_now.tv_usec - t_start.tv_usec) / 1000000.0;
             if (elap < 0.001) elap = 0.001;
@@ -1486,20 +1522,37 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
 
     log_history(p->log_file, cmd_name, acts, nacts, 1);
 
-    av = d99_xmalloc((files.n + 8) * sizeof(char *));
-    av[na++] = inst;
-    if (strcmp(p->root, "/") != 0) {
-        ro = d99_xasprintf("--root=%s", p->root);
-        av[na++] = ro;
+    if (all_pipelined) {
+        av = d99_xmalloc(((size_t)nacts + 8) * sizeof(char *));
+        av[na++] = inst;
+        if (strcmp(p->root, "/") != 0) {
+            ro = d99_xasprintf("--root=%s", p->root);
+            av[na++] = ro;
+        }
+        av[na++] = (char *)"--configure";
+        for (i = 0; i < nacts; i++)
+            av[na++] = acts[i].name;
+        av[na] = NULL;
+        rc = run_inst(av);
+        free(av);
+        free(ro);
+        ro = NULL;
+    } else {
+        av = d99_xmalloc((files.n + 8) * sizeof(char *));
+        av[na++] = inst;
+        if (strcmp(p->root, "/") != 0) {
+            ro = d99_xasprintf("--root=%s", p->root);
+            av[na++] = ro;
+        }
+        av[na++] = (char *)"-i";
+        for (i = 0; i < files.n; i++)
+            av[na++] = files.v[i];
+        av[na] = NULL;
+        rc = run_inst(av);
+        free(av);
+        free(ro);
+        ro = NULL;
     }
-    av[na++] = (char *)"-i";
-    for (i = 0; i < files.n; i++)
-        av[na++] = files.v[i];
-    av[na] = NULL;
-    rc = run_inst(av);
-    free(av);
-    free(ro);
-    ro = NULL;
 
     if (rc == 0) {
         log_history(p->log_file, cmd_name, acts, nacts, 0);

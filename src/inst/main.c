@@ -488,6 +488,8 @@ int inst_unpack_deb(struct d99_ctx *c, const char *deb,
         }
     }
 
+    if (isatty(STDOUT_FILENO))
+        printf("\r\033[K");
     if (old && old->version) {
         printf("Preparing to unpack %s ...\n", deb);
         printf("Unpacking %s (%s) over (%s) ...\n", np->name, np->version, old->version);
@@ -660,6 +662,8 @@ static int inst_configure(struct d99_ctx *c, const char *name)
         return 1;
     }
     oldver = d99_pkg_field_dup(p, "Config-Version");
+    if (isatty(STDOUT_FILENO))
+        printf("\r\033[K");
     printf("Setting up %s (%s) ...\n", p->name, p->version ? p->version : "");
     args[na++] = (char *)"configure";
     if (oldver)
@@ -682,6 +686,24 @@ static int inst_configure(struct d99_ctx *c, const char *name)
         d99_verbose("index rebuild skipped");
     free(oldver);
     return 0;
+}
+
+static void print_dpkg_progress(size_t cur, size_t total)
+{
+    if (!isatty(STDOUT_FILENO) || total == 0) return;
+    int pct = (int)((cur * 100) / total);
+    if (pct > 100) pct = 100;
+    int width = 30;
+    int filled = (pct * width) / 100;
+    printf("\r\033[KProgress: [%3d%%] [", pct);
+    for (int i = 0; i < filled; i++) putchar('#');
+    for (int i = filled; i < width; i++) putchar('.');
+    printf("]");
+    if (cur >= total)
+        putchar('\n');
+    else
+        putchar('\r');
+    fflush(stdout);
 }
 
 /* shared file-removal helper; keep_conffiles: 0 on purge */
@@ -762,6 +784,8 @@ static int inst_remove(struct d99_ctx *c, const char *name)
         printf("Package '%s' is not installed, so not removed\n", name);
         return 0;
     }
+    if (isatty(STDOUT_FILENO))
+        printf("\r\033[K");
     printf("Removing %s (%s) ...\n", p->name, p->version ? p->version : "");
     if (d99_state_next(p->state, D99_EVT_REMOVE, &next) != 0) {
         fprintf(stderr, "d99-inst: cannot remove '%s' in state '%s'\n",
@@ -811,6 +835,8 @@ static int inst_purge(struct d99_ctx *c, const char *name)
         printf("Package '%s' is not installed, so not purged\n", name);
         return 0;
     }
+    if (isatty(STDOUT_FILENO))
+        printf("\r\033[K");
     printf("Purging configuration files for %s (%s) ...\n", p->name, p->version ? p->version : "");
     if (p->state != D99_PS_CONFIGFILES && p->state != D99_PS_NOTINSTALLED) {
         char *args[2];
@@ -1159,16 +1185,26 @@ int main(int argc, char **argv)
             d99_ar_close(ar);
         }
 
-        for (k = 0; k < ops.n; k++)
+        size_t total_steps = ops.n + (act == A_INSTALL ? nbatch : 0);
+        size_t cur_step = 0;
+
+        for (k = 0; k < ops.n; k++) {
             if (inst_unpack_deb(&c, ops.v[k], batch, nbatch) != 0)
                 rc = 1;
+            cur_step++;
+            print_dpkg_progress(cur_step, total_steps);
+        }
 
         if (act == A_INSTALL) {
             /* configure in argument order */
-            for (k = 0; k < nbatch; k++)
-                if (batch[k]->name)
+            for (k = 0; k < nbatch; k++) {
+                if (batch[k]->name) {
                     if (inst_configure(&c, batch[k]->name) != 0)
                         rc = 1;
+                    cur_step++;
+                    print_dpkg_progress(cur_step, total_steps);
+                }
+            }
         }
         if (!no_triggers && act == A_INSTALL)
             if (triggers_process(&c) != 0)
@@ -1177,36 +1213,43 @@ int main(int argc, char **argv)
         free(batch);
         break;
     }
-    case A_CONFIGURE:
+    case A_CONFIGURE: {
         if (ops.n == 0) {
             fprintf(stderr, "d99-inst: --configure needs a package name\n");
             rc = 2;
             break;
         }
-        for (i = 0; (size_t)i < ops.n; i++)
+        size_t total_steps = ops.n;
+        for (i = 0; (size_t)i < ops.n; i++) {
             if (inst_configure(&c, ops.v[i]) != 0)
                 rc = 1;
+            print_dpkg_progress(i + 1, total_steps);
+        }
+        if (!no_triggers)
+            if (triggers_process(&c) != 0)
+                rc = 1;
         break;
+    }
     case A_REMOVE:
+    case A_PURGE: {
         if (ops.n == 0) {
-            fprintf(stderr, "d99-inst: --remove needs a package name\n");
+            fprintf(stderr, "d99-inst: needs a package name\n");
             rc = 2;
             break;
         }
-        for (i = 0; (size_t)i < ops.n; i++)
-            if (inst_remove(&c, ops.v[i]) != 0)
-                rc = 1;
-        break;
-    case A_PURGE:
-        if (ops.n == 0) {
-            fprintf(stderr, "d99-inst: --purge needs a package name\n");
-            rc = 2;
-            break;
+        size_t total_steps = ops.n;
+        for (i = 0; (size_t)i < ops.n; i++) {
+            if (act == A_PURGE) {
+                if (inst_purge(&c, ops.v[i]) != 0)
+                    rc = 1;
+            } else {
+                if (inst_remove(&c, ops.v[i]) != 0)
+                    rc = 1;
+            }
+            print_dpkg_progress(i + 1, total_steps);
         }
-        for (i = 0; (size_t)i < ops.n; i++)
-            if (inst_purge(&c, ops.v[i]) != 0)
-                rc = 1;
         break;
+    }
     default:
         usage();
         rc = 2;

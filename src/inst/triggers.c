@@ -137,6 +137,8 @@ int triggers_process(struct d99_ctx *c)
                             if (args[0])
                                 targs[na++] = args;
                             targs[na] = NULL;
+                            if (isatty(STDOUT_FILENO))
+                                printf("\r\033[K");
                             printf("Processing triggers for %s (%s) ...\n", owner, pp->version ? pp->version : "");
                             if (hook_run(c, owner, pp->version, pp->arch,
                                          "postinst", targs) != 0) {
