@@ -95,6 +95,17 @@ check "postinst ran with dpkg env" grep -q "SCRIPT=postinst" "${R}/tmp/postinst.
 check "postinst saw configure" grep -q "postinst: configure" "${R}/tmp/postinst.out"
 check "hello-d99 binary works" "${R}/usr/bin/hello-d99"
 
+if [ -x /bin/sleep ]; then
+    cp /bin/sleep "${S2}/usr/bin/hello-d99"
+    "${BIN}/d99-deb" -Z gz -b "${S2}" "${M}/hello-d99_1.0-2_all.deb" >/dev/null
+    "${R}/usr/bin/hello-d99" 5 &
+    RUNNING_PID=$!
+    sleep 0.1
+    check "upgrade running executable without ETXTBSY" "${BIN}/d99-inst" --root="${R}" -i "${M}/hello-d99_1.0-2_all.deb"
+    kill "${RUNNING_PID}" 2>/dev/null || true
+    wait "${RUNNING_PID}" 2>/dev/null || true
+fi
+
 # ------------------------------------------------------- d99-query
 check "query -W works" sh -c \
     "\"${BIN}/d99-query\" --admindir \"${R}/var/lib/dpkg\" -W hello-d99 | grep -q '1.0-1'"

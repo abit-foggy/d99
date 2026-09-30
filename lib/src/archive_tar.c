@@ -815,18 +815,38 @@ long d99_tar_extract(d99_tarr *t, const d99_tar_extract_opts *o)
 
         if (m.typeflag == '0' || m.typeflag == '7') {
             int dfd, fd;
+            char tmpbase[4096];
+            int use_tmp = 1;
+            mode_t fmode = (mode_t)(m.mode & 07777) ? (mode_t)(m.mode & 07777) : 0644;
+
             if (open_parent(&pc, rootfd, use, base, sizeof base, &dfd) != 0)
                 goto member_err_with_errno;
-            fd = openat(dfd, base, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW,
-                        (mode_t)(m.mode & 07777) ? (mode_t)(m.mode & 07777) : 0644);
-            if (fd < 0 && errno == ELOOP) {
-                unlinkat(dfd, base, 0);
-                fd = openat(dfd, base, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW,
-                            (mode_t)(m.mode & 07777) ? (mode_t)(m.mode & 07777) : 0644);
+
+            if (snprintf(tmpbase, sizeof tmpbase, "%s.d99-tmp", base) >= (int)sizeof(tmpbase) ||
+                strlen(tmpbase) > 255) {
+                use_tmp = 0;
+            } else {
+                unlinkat(dfd, tmpbase, 0);
+                fd = openat(dfd, tmpbase, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, fmode);
+                if (fd < 0)
+                    use_tmp = 0;
             }
-            close(dfd);
-            if (fd < 0)
+
+            if (!use_tmp) {
+                fd = openat(dfd, base, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, fmode);
+                if (fd < 0 && (errno == ELOOP || errno == ETXTBSY)) {
+                    unlinkat(dfd, base, 0);
+                    fd = openat(dfd, base, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, fmode);
+                }
+            }
+
+            if (fd < 0) {
+                int save_err = errno;
+                close(dfd);
+                errno = save_err;
                 goto member_err_with_errno;
+            }
+
             posix_fadvise(fd, 0, 0, POSIX_FADV_SEQUENTIAL);
             {
                 unsigned char buf[131072];
@@ -836,6 +856,8 @@ long d99_tar_extract(d99_tarr *t, const d99_tar_extract_opts *o)
                                   ? sizeof buf : (size_t)left;
                     if (d99_tar_read_data(t, buf, want) != 0) {
                         close(fd);
+                        if (use_tmp) unlinkat(dfd, tmpbase, 0);
+                        close(dfd);
                         d99_warn("truncated member %s", m.name);
                         if (!o->keep_going) {
                             if (pc.fd >= 0) close(pc.fd);
@@ -844,9 +866,22 @@ long d99_tar_extract(d99_tarr *t, const d99_tar_extract_opts *o)
                         }
                         goto next_member;
                     }
-                    if (write(fd, buf, want) < 0) {
-                        close(fd);
-                        goto member_err_with_errno;
+                    const unsigned char *wp = buf;
+                    size_t wleft = want;
+                    while (wleft > 0) {
+                        ssize_t wr = write(fd, wp, wleft);
+                        if (wr <= 0) {
+                            if (wr < 0 && errno == EINTR)
+                                continue;
+                            int save_err = errno;
+                            close(fd);
+                            if (use_tmp) unlinkat(dfd, tmpbase, 0);
+                            close(dfd);
+                            errno = save_err;
+                            goto member_err_with_errno;
+                        }
+                        wp += wr;
+                        wleft -= (size_t)wr;
                     }
                     left -= (long long)want;
                 }
@@ -855,8 +890,29 @@ long d99_tar_extract(d99_tarr *t, const d99_tar_extract_opts *o)
                     int rcc = fchown(fd, (uid_t)m.uid, (gid_t)m.gid);
                     (void)rcc;
                 }
-                if (close(fd) != 0)
+                if (close(fd) != 0) {
+                    int save_err = errno;
+                    if (use_tmp) unlinkat(dfd, tmpbase, 0);
+                    close(dfd);
+                    errno = save_err;
                     goto member_err_with_errno;
+                }
+                if (use_tmp) {
+                    if (renameat(dfd, tmpbase, dfd, base) != 0) {
+                        if (errno != EISDIR && errno != EEXIST) {
+                            unlinkat(dfd, base, 0);
+                            if (renameat(dfd, tmpbase, dfd, base) == 0)
+                                goto rename_done;
+                        }
+                        int save_err = errno;
+                        unlinkat(dfd, tmpbase, 0);
+                        close(dfd);
+                        errno = save_err;
+                        goto member_err_with_errno;
+                    }
+rename_done:;
+                }
+                close(dfd);
             }
             if (o->record)
                 o->record(use, o->record_ud);
