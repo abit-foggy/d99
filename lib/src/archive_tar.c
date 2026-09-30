@@ -155,6 +155,7 @@ static char *read_payload(d99_tarr *t, long long size)
 {
     char *buf;
     size_t left = (size_t)size;
+    long long pad;
 
     if (size < 0 || size > (64 << 20))
         return NULL;
@@ -164,7 +165,15 @@ static char *read_payload(d99_tarr *t, long long size)
         return NULL;
     }
     buf[left] = '\0';
-    t->pad_left = (BLK - ((long long)size % BLK)) % BLK;
+    pad = (BLK - ((long long)size % BLK)) % BLK;
+    if (pad > 0) {
+        char padbuf[BLK];
+        if (rd_exact(t->d, padbuf, (size_t)pad) != 1) {
+            free(buf);
+            return NULL;
+        }
+    }
+    t->pad_left = 0;
     return buf;
 }
 
@@ -279,8 +288,13 @@ int d99_tar_next(d99_tarr *t, d99_tar_member *m)
         m->size = size;
         m->mtime = mtime;
         m->typeflag = type;
-        t->member_left = size;
-        t->pad_left = (BLK - (size % BLK)) % BLK;
+        if (type == '1' || type == '2' || type == '3' || type == '4' || type == '5' || type == '6') {
+            t->member_left = 0;
+            t->pad_left = 0;
+        } else {
+            t->member_left = size;
+            t->pad_left = (BLK - (size % BLK)) % BLK;
+        }
         return 1;
     }
 }

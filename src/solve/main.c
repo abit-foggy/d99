@@ -341,6 +341,58 @@ static int node_satisfies(pnode *nd, const char *name, int op, const char *ver)
     return cand_satisfies(nd->cand, name, op, ver);
 }
 
+static int installed_deps_satisfied(d99_db *db, d99_pkg *p)
+{
+    d99_deplist *dls[2];
+    int di;
+    size_t k, j;
+
+    dls[0] = &p->predepends;
+    dls[1] = &p->depends;
+    for (di = 0; di < 2; di++) {
+        for (k = 0; k < dls[di]->n; k++) {
+            d99_depgroup *g = &dls[di]->g[k];
+            int group_sat = 0;
+            for (j = 0; j < g->n; j++) {
+                d99_depalternative *alt = &g->alts[j];
+                size_t pidx;
+                if (!d99_arch_ok(alt->arch, d99_host_arch()))
+                    continue;
+                for (pidx = 0; pidx < d99_db_count(db); pidx++) {
+                    d99_pkg *cand_pkg = d99_db_at(db, pidx);
+                    if (cand_pkg->state != D99_PS_INSTALLED)
+                        continue;
+                    if (strcmp(cand_pkg->name, alt->name) == 0 &&
+                        (alt->op == D99_DEP_NONE || !alt->ver ||
+                         d99_verrel(d99_vercmp(cand_pkg->version, alt->ver), alt->op))) {
+                        group_sat = 1;
+                        break;
+                    }
+                    /* check provides */
+                    size_t pi, pj;
+                    for (pi = 0; pi < cand_pkg->provides.n; pi++) {
+                        for (pj = 0; pj < cand_pkg->provides.g[pi].n; pj++) {
+                            d99_depalternative *pa = &cand_pkg->provides.g[pi].alts[pj];
+                            if (strcmp(pa->name, alt->name) == 0 &&
+                                (alt->op == D99_DEP_NONE || !alt->ver ||
+                                 (pa->ver && d99_verrel(d99_vercmp(pa->ver, alt->ver), alt->op)))) {
+                                group_sat = 1;
+                                break;
+                            }
+                        }
+                        if (group_sat) break;
+                    }
+                    if (group_sat) break;
+                }
+                if (group_sat) break;
+            }
+            if (!group_sat)
+                return 0;
+        }
+    }
+    return 1;
+}
+
 struct target_spec {
     char *name;
     int op;
@@ -558,56 +610,59 @@ static int plan_install(const char *cmd_name, paths *p, struct target_spec *targ
         nodes[i].var = d99_sat_var(sat);
 
     for (i = 0; i < nnodes; i++) {
-        if (nodes[i].is_installed)
-            continue;
-        {
-            d99_deplist *dls[2];
-            int di;
+        d99_deplist *dls[2];
+        int di;
+        if (nodes[i].is_installed) {
+            if (installed_deps_satisfied(db, nodes[i].ipkg))
+                continue;
+            dls[0] = &nodes[i].ipkg->predepends;
+            dls[1] = &nodes[i].ipkg->depends;
+        } else {
             cand_ensure_deps(nodes[i].cand, repo->ar);
             dls[0] = &nodes[i].cand->predepends;
             dls[1] = &nodes[i].cand->depends;
-            for (di = 0; di < 2; di++) {
-                for (k = 0; k < dls[di]->n; k++) {
-                    d99_depgroup *g = &dls[di]->g[k];
-                    int lits[512];
-                    int nl = 0;
-                    lits[nl++] = D99_LIT_NEG(nodes[i].var);
-                    for (j = 0; j < g->n; j++) {
-                        d99_depalternative *alt = &g->alts[j];
-                        int *ids;
-                        int n, q;
-                        if (!d99_arch_ok(alt->arch, d99_host_arch()))
-                            continue;
-                        n = mm_get(&byname, alt->name, &ids);
-                        for (q = 0; q < n && nl < 512; q++) {
-                            if (node_satisfies(&nodes[ids[q]], alt->name,
-                                               alt->op, alt->ver)) {
-                                int pos_lit = D99_LIT_POS(nodes[ids[q]].var);
-                                int dup = 0;
-                                int l;
-                                for (l = 0; l < nl; l++) {
-                                    if (lits[l] == pos_lit) {
-                                        dup = 1;
-                                        break;
-                                    }
+        }
+        for (di = 0; di < 2; di++) {
+            for (k = 0; k < dls[di]->n; k++) {
+                d99_depgroup *g = &dls[di]->g[k];
+                int lits[512];
+                int nl = 0;
+                lits[nl++] = D99_LIT_NEG(nodes[i].var);
+                for (j = 0; j < g->n; j++) {
+                    d99_depalternative *alt = &g->alts[j];
+                    int *ids;
+                    int n, q;
+                    if (!d99_arch_ok(alt->arch, d99_host_arch()))
+                        continue;
+                    n = mm_get(&byname, alt->name, &ids);
+                    for (q = 0; q < n && nl < 512; q++) {
+                        if (node_satisfies(&nodes[ids[q]], alt->name,
+                                           alt->op, alt->ver)) {
+                            int pos_lit = D99_LIT_POS(nodes[ids[q]].var);
+                            int dup = 0;
+                            int l;
+                            for (l = 0; l < nl; l++) {
+                                if (lits[l] == pos_lit) {
+                                    dup = 1;
+                                    break;
                                 }
-                                if (!dup)
-                                    lits[nl++] = pos_lit;
                             }
+                            if (!dup)
+                                lits[nl++] = pos_lit;
                         }
                     }
-                    d99_sat_clause(sat, lits, nl);
                 }
+                d99_sat_clause(sat, lits, nl);
             }
         }
-        {
-            d99_deplist *dls[2];
-            int di;
-            dls[0] = &nodes[i].cand->conflicts;
-            dls[1] = &nodes[i].cand->breaks;
-            for (di = 0; di < 2; di++) {
-                for (k = 0; k < dls[di]->n; k++) {
-                    d99_depgroup *g = &dls[di]->g[k];
+        if (!nodes[i].is_installed) {
+            d99_deplist *dls_c[2];
+            int di_c;
+            dls_c[0] = &nodes[i].cand->conflicts;
+            dls_c[1] = &nodes[i].cand->breaks;
+            for (di_c = 0; di_c < 2; di_c++) {
+                for (k = 0; k < dls_c[di_c]->n; k++) {
+                    d99_depgroup *g = &dls_c[di_c]->g[k];
                     for (j = 0; j < g->n; j++) {
                         d99_depalternative *alt = &g->alts[j];
                         int *ids;
@@ -695,9 +750,11 @@ static int plan_install(const char *cmd_name, paths *p, struct target_spec *targ
             continue;
         if (inst && inst->state == D99_PS_INSTALLED &&
             d99_vercmp(inst->version, c->version) == 0) {
-            printf("d99-solve: %s %s is already installed.\n",
-                   t->name, c->version);
-            continue;
+            if (installed_deps_satisfied(db, inst)) {
+                printf("d99-solve: %s %s is already installed.\n",
+                       t->name, c->version);
+                continue;
+            }
         }
         if (nbase == basecap) {
             basecap = basecap ? basecap * 2 : 16;
@@ -1304,7 +1361,7 @@ int main(int argc, char **argv)
     paths p;
     const char *root = "/";
     const char *arch = NULL;
-    int yes = 0, download_only = 0, print_uris = 0, simulate = 0;
+    int yes = 0, download_only = 0, print_uris = 0, simulate = 0, fix_broken = 0;
     const char *cmd = NULL;
     d99_strvec ops;
     int i, rc;
@@ -1339,6 +1396,8 @@ int main(int argc, char **argv)
                     simulate = 1;
                 else if (strcmp(a, "--quiet") == 0)
                     ;
+                else if (strcmp(a, "--fix-broken") == 0)
+                    fix_broken = 1;
                 else if (strcmp(a, "--reinstall") == 0)
                     ;   /* accepted; same-version reinstalls are a no-op */
                 else if (strcmp(a, "--verbose") == 0)
@@ -1359,6 +1418,7 @@ int main(int argc, char **argv)
                     case 'y': yes = 1; break;
                     case 'd': download_only = 1; break;
                     case 's': simulate = 1; break;
+                    case 'f': fix_broken = 1; break;
                     case 'q': break;
                     case 'v': d99_set_verbose(1); break;
                     default: d99_fallback_or_die(argv[0], argv);
@@ -1386,9 +1446,42 @@ int main(int argc, char **argv)
     } else if (strcmp(cmd, "install") == 0 || strcmp(cmd, "i") == 0 || strcmp(cmd, "in") == 0) {
         struct target_spec *targets;
         int k;
-        if (ops.n == 0) {
+        if (ops.n == 0 && !fix_broken) {
             fprintf(stderr, "d99-solve: install needs a package name\n");
             rc = 2;
+        } else if (ops.n == 0 && fix_broken) {
+            d99_db *db = d99_db_load_status(p.admindir);
+            d99_strvec broken;
+            size_t bi;
+            d99_sv_init(&broken);
+            if (db) {
+                for (bi = 0; bi < d99_db_count(db); bi++) {
+                    d99_pkg *pp = d99_db_at(db, bi);
+                    if (pp->state == D99_PS_INSTALLED && !installed_deps_satisfied(db, pp)) {
+                        d99_sv_push(&broken, pp->name);
+                    }
+                }
+            }
+            if (broken.n == 0) {
+                printf("d99-solve: 0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.\n");
+                rc = 0;
+            } else {
+                targets = d99_xmalloc(broken.n * sizeof(struct target_spec));
+                for (k = 0; (size_t)k < broken.n; k++) {
+                    targets[k].name = d99_xstrdup(broken.v[k]);
+                    targets[k].op = D99_DEP_NONE;
+                    targets[k].ver = NULL;
+                }
+                rc = cmd_install(argv[0], cmd_name, &p, targets, (int)broken.n, yes,
+                                 download_only, print_uris, simulate);
+                for (k = 0; (size_t)k < broken.n; k++) {
+                    free(targets[k].name);
+                }
+                free(targets);
+            }
+            d99_sv_free(&broken);
+            if (db)
+                d99_db_free(db);
         } else {
             int bad = 0;
             targets = d99_xmalloc(ops.n * sizeof(struct target_spec));
