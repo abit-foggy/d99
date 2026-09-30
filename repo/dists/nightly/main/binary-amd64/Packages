@@ -1,56 +1,20 @@
 Package: d99-nightly
-Architecture: all
-Version: 999.0.0+nightly.8efef6a
-Priority: optional
-Section: utils
-Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
-Provides: dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0)
-Depends: d99 (= 999.0.0+nightly.8efef6a)
-Replaces: dpkg, apt, dpkg-dev, apt-utils
-Filename: pool/main/d/d99/d99-nightly_999.0.0+nightly.8efef6a_all.deb
-Size: 654
-MD5sum: ddbbf6d7a8f360bf4d889a3e2de0005c
-SHA1: d81349bc03425b0c60e300b9c18fe877714a2cc4
-SHA256: fbf58076c1beccb080d82264c9fb2716f1be42c30ce7a2652050bfac454c1019
-SHA512: bbdcb4ac0047a5268052bce8dd979553b2bd6bd41e499ba18d47b0680241db3bfaeb76f6956bca554e95d662d5f9431bc0ecf4a8a25717112852c567954f36c0
-Description: Debian packaging toolchain in C99 (Nightly tracking package)
- Metapackage depending on the latest d99 nightly snapshot build.
-
-Package: d99
 Architecture: amd64
-Version: 0.1.0-1
+Version: 999.0.0+nightly.2f8b564
 Priority: optional
 Section: utils
 Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
-Provides: dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0)
+Provides: d99 (= 999.0.0+nightly.2f8b564), dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0)
 Depends: libc6, zlib1g, liblzma5, libzstd1
-Replaces: dpkg, apt, dpkg-dev, apt-utils
-Filename: pool/main/d/d99/d99_0.1.0-1_amd64.deb
-Size: 426956
-MD5sum: 3266ea24688e7f740dfd7353c4da04b4
-SHA1: 97598ddd1b00c96f1739deffa9c3fd265040c2d1
-SHA256: 69d52e33f7d2e2ff15faa5adf0e90eb64088caf9aeddd2285e4264de16d35acb
-SHA512: 0ab451dff625cb52f534c8bbd510a9c59fe8637e5eaf2ef6372dc7504180297cbdfec9234c9ffbd7a0156f424c8f367b09506330e0a651208e66a7778d6f4c61
-Description: Debian packaging toolchain in C99
- d99 is a lightweight Debian packaging toolchain implemented in C99,
- superseding standard dpkg, apt, dpkg-dev, and apt-utils.
-
-Package: d99
-Architecture: amd64
-Version: 999.0.0+nightly.8efef6a
-Priority: optional
-Section: utils
-Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
-Provides: dpkg (= 99:999.0.0), apt (= 99:999.0.0), dpkg-dev (= 99:999.0.0), apt-utils (= 99:999.0.0), d99-nightly
-Depends: libc6, zlib1g, liblzma5, libzstd1
-Replaces: dpkg, apt, dpkg-dev, apt-utils
-Filename: pool/main/d/d99/d99_999.0.0+nightly.8efef6a_amd64.deb
-Size: 427094
-MD5sum: 7610b3f44708a6856200c5b57ba8fed6
-SHA1: 3f85a334baf2afa1ba276e4f6aa3a50f5e3c9674
-SHA256: 1b18fcf8e20dfc523a01c728b02bf6efa8af8c955ae835d32c73c461b9f17f52
-SHA512: d038587f449cb9950dd6c78af39569e28160427af512c471e56e840d390ff7fcfcdd25f296eb90faa684e1e6928ff0ac75f0166cd3d86def80b70ae028b11730
-Description: Debian packaging toolchain in C99 (Nightly snapshot)
+Conflicts: d99
+Replaces: d99, dpkg, apt, dpkg-dev, apt-utils
+Filename: pool/main/d/d99/d99-nightly_999.0.0+nightly.2f8b564_amd64.deb
+Size: 427142
+MD5sum: 328183e9f4888284a93957a852b5ce53
+SHA1: 9e0673403712fe9869b69067c4f1225a35826af6
+SHA256: b8913000b5cb83219ec0623d9802aed72e3ed1d790e6cd540343e1505885cb78
+SHA512: 71a150053efcfe0273c16aedf6ff37ff4ac2bb85445f63b9e11296375c9553e75feaaad10fad2c57ee050612b18c4d4b2b1fe13762ac43c2c373568b4ace573e
+Description: Debian packaging toolchain in C99 (Nightly)
  d99 is a lightweight Debian packaging toolchain implemented in C99,
  superseding standard dpkg, apt, dpkg-dev, and apt-utils.
  Nightly builds track main development snapshots and out-version stable.

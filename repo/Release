@@ -1,61 +1,61 @@
 Architectures: amd64 all
-Date: Wed, 30 Sep 2026 03:01:30 +0000
+Date: Wed, 30 Sep 2026 03:04:49 +0000
 Label: d99
 Origin: d99
 Suite: repo
 MD5Sum:
- 986c0510cbf2a05e90cbf13f7b569fcf             2727 Packages
- d0ffaeb78d59a45df25e966dde25526d             1071 Packages.gz
- f3a847f094067f0d5dfed8f50fbab48d               98 Release
- 88a12abbda397da1ddb53e6f753e1a8f             2338 dists/nightly/Release
+ 9866770125b4423e5792eccc606a51c0             1953 Packages
+ d1aca9e8a50cf60de0fd1eac17af052f              852 Packages.gz
+ a47ba179f491e371535f512d6e2ab29b               98 Release
+ 10577f79d6d47ebf34fd2ce40830655d             2338 dists/nightly/Release
  d41d8cd98f00b204e9800998ecf8427e                0 dists/nightly/main/binary-all/Packages
- f602f46ea65e3ece0eb5a511a9686d11               29 dists/nightly/main/binary-all/Packages.gz
- 986c0510cbf2a05e90cbf13f7b569fcf             2727 dists/nightly/main/binary-amd64/Packages
- d0ffaeb78d59a45df25e966dde25526d             1071 dists/nightly/main/binary-amd64/Packages.gz
- 8776d2aa65fdb1143215dbcdc6aa074a             2336 dists/stable/Release
+ 0a7796b1a13019847ae47007660d63ea               29 dists/nightly/main/binary-all/Packages.gz
+ 95da43bf664450111d09db0d86009b2a             1046 dists/nightly/main/binary-amd64/Packages
+ 7507936cfbff034592ef20df0dd59189              625 dists/nightly/main/binary-amd64/Packages.gz
+ 65d44b43395c024b9e72ef18719458b8             2336 dists/stable/Release
  d41d8cd98f00b204e9800998ecf8427e                0 dists/stable/main/binary-all/Packages
- f602f46ea65e3ece0eb5a511a9686d11               29 dists/stable/main/binary-all/Packages.gz
- 986c0510cbf2a05e90cbf13f7b569fcf             2727 dists/stable/main/binary-amd64/Packages
- d0ffaeb78d59a45df25e966dde25526d             1071 dists/stable/main/binary-amd64/Packages.gz
+ db8abb257160c4328e1baffec5f82684               29 dists/stable/main/binary-all/Packages.gz
+ b2c3eb8dc00896ab2cbf785a0384c14e              907 dists/stable/main/binary-amd64/Packages
+ 861367b7c052a5912d2a4f106fdbe524              573 dists/stable/main/binary-amd64/Packages.gz
 SHA1:
- 5f442efd7dab9b61bd7a26605b6d81607086ad33             2727 Packages
- ec0e78f58de5f052dc01c5e6d2010d08537bc31e             1071 Packages.gz
- 75e71aba854f5b9bcba626e79c8c2291296e1618               98 Release
- ff8a7ee631b0f72be2747d64376d123039bcd481             2338 dists/nightly/Release
+ 2842d2be6f6adfad70fba65dfa03d456f56c8ecb             1953 Packages
+ a8ba908df551c3f149bf0fccbde67f0cebc12d99              852 Packages.gz
+ 0761fc47e52e04cab42f01816132c4b32d338b8d               98 Release
+ 3a76e3cd72eef95480b24614cca2a94865ed0a85             2338 dists/nightly/Release
  da39a3ee5e6b4b0d3255bfef95601890afd80709                0 dists/nightly/main/binary-all/Packages
- e01fd44be3e6cb30afbf667e21cf63f7e5b32d14               29 dists/nightly/main/binary-all/Packages.gz
- 5f442efd7dab9b61bd7a26605b6d81607086ad33             2727 dists/nightly/main/binary-amd64/Packages
- ec0e78f58de5f052dc01c5e6d2010d08537bc31e             1071 dists/nightly/main/binary-amd64/Packages.gz
- 96f45c963186f827d3eb18c36ec8be883c8076f5             2336 dists/stable/Release
+ 91102339f96d987e125a62192b15b5234529b258               29 dists/nightly/main/binary-all/Packages.gz
+ f7ea0bc7e52fbfc3920b7b5e5203f98bdb4c1b45             1046 dists/nightly/main/binary-amd64/Packages
+ aedff8df8abd1f0355ba8d8c1afe4051bf7a269c              625 dists/nightly/main/binary-amd64/Packages.gz
+ 15d18ae0d97e15f70f8553f37518ceee2ddd99e1             2336 dists/stable/Release
  da39a3ee5e6b4b0d3255bfef95601890afd80709                0 dists/stable/main/binary-all/Packages
- e01fd44be3e6cb30afbf667e21cf63f7e5b32d14               29 dists/stable/main/binary-all/Packages.gz
- 5f442efd7dab9b61bd7a26605b6d81607086ad33             2727 dists/stable/main/binary-amd64/Packages
- ec0e78f58de5f052dc01c5e6d2010d08537bc31e             1071 dists/stable/main/binary-amd64/Packages.gz
+ 628b7dc7bcca3193e1fe91169d22bfbbba1d7829               29 dists/stable/main/binary-all/Packages.gz
+ e901c7be8cf076c0e1c8c658d07efaa661b260fa              907 dists/stable/main/binary-amd64/Packages
+ 70f23bee0175b162f574aba28f96a8c5b3128329              573 dists/stable/main/binary-amd64/Packages.gz
 SHA256:
- f4f24611b83e619115cf6e079e8e6558793167a52794578aab8289d4dff91814             2727 Packages
- be5c78653261d58de05cba699357a966df4633791de48ea3b6819881f000585f             1071 Packages.gz
- 56dfec42437adabb5fd510fff4d4a55a7d85ca63c3db0a95eedf80d8adda9f5f               98 Release
- 4727f237af7c89d3be457f2cd82229b889cf9efd475501ba9c442e565d83011e             2338 dists/nightly/Release
+ c2ea5a98bdf348487f3243f5821b3d5fc87f049c310f0dbf46745857995ab735             1953 Packages
+ 30733dd1090b8d68914e63ebbbd586b9502f24533de8d26fe3b8461ba655fb9a              852 Packages.gz
+ 66595120fd5a8a165b3f7194f6dc6392905e020d5f62870c5e63c0e13238457c               98 Release
+ 0cabe08e79bf5ac506494bb48ae8b4d81ff9df936ee9c3af8f65b517e9e83eb9             2338 dists/nightly/Release
  e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855                0 dists/nightly/main/binary-all/Packages
- 8b821ddc2f87c9012f069cb836daca6eeeb448c0d50273749ddbed3c204290c4               29 dists/nightly/main/binary-all/Packages.gz
- f4f24611b83e619115cf6e079e8e6558793167a52794578aab8289d4dff91814             2727 dists/nightly/main/binary-amd64/Packages
- be5c78653261d58de05cba699357a966df4633791de48ea3b6819881f000585f             1071 dists/nightly/main/binary-amd64/Packages.gz
- 751b60673ddef226fe9ff87bd44b8e83e9e388d0879252281cf4e2d2f9bc5fe1             2336 dists/stable/Release
+ 4641ac66938375bb1620ec5d27754c7aafb42aaa03888145ca1652131fbc0ecd               29 dists/nightly/main/binary-all/Packages.gz
+ b1bf6d634f54559394542b6b806217aa3ff693cf1baa9d1beaaab24062672f32             1046 dists/nightly/main/binary-amd64/Packages
+ 075803a2a04cf43d2d3f0ce5ac7e0ce519890f1706b50bbca59792ecacc92d3a              625 dists/nightly/main/binary-amd64/Packages.gz
+ bfd0bed60fc29ffadaf134ad9f949e7fe7b0e955de70b148b072d93b06e1da04             2336 dists/stable/Release
  e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855                0 dists/stable/main/binary-all/Packages
- 8b821ddc2f87c9012f069cb836daca6eeeb448c0d50273749ddbed3c204290c4               29 dists/stable/main/binary-all/Packages.gz
- f4f24611b83e619115cf6e079e8e6558793167a52794578aab8289d4dff91814             2727 dists/stable/main/binary-amd64/Packages
- be5c78653261d58de05cba699357a966df4633791de48ea3b6819881f000585f             1071 dists/stable/main/binary-amd64/Packages.gz
+ 529bd9ae71cf8ad9462694dbf7773b8054335ac58b43245f38b1792819957f5b               29 dists/stable/main/binary-all/Packages.gz
+ 76ebd940d84341a1682e79fedf771fb4250033a9f0cc5157448b6d9d3d33ac2c              907 dists/stable/main/binary-amd64/Packages
+ 4dc7f0ffb8dab2500297bad67c0ba6a1950bdf32a09d720447476a421e7546da              573 dists/stable/main/binary-amd64/Packages.gz
 SHA512:
- bbf4424979bc910c6d7a29edd5ec7bada3f26a6f4a82479739911ebff2f4babdfffecfc29840f35f8cf45fd8ed110b2c0e58a9d70236dbcdaa32718b98818614             2727 Packages
- 8d65dcd73f27b932667779c2d7f05bdf3d29c85f7964b798cafd1a79e83a78cf3f11cbbb17a6393a4d36eb534c9f287043ba219489140199f2a653e6d7f18c3d             1071 Packages.gz
- 757aad749cb18922f21f6cfaa01d00ed6e23762a9c039eb9bc43766c873a65922162786cdd26d9cfea0d727a02ffd541dfb3edee656064e50ce8013a841cb138               98 Release
- 3ff57f2381a86d6783d4b9334c2fd0b1b99b211a4b8f2d752222bed6f5a05c46079b1af27522853ceac502d146c3236ee9dd9cae3c68db6298910ef5f0ddf882             2338 dists/nightly/Release
+ 38a6614d0dd575c77a88888eb983480a62a31fadecfef314c7be3eca0cfe190f2b4c345a3de94e107f2920cdd2844c852dd507d55422db3bdae06567b107e5cb             1953 Packages
+ 8be32d37d63d37e967794f5d50a0017cd444a2b3a862c481a0ed7cf3e2e12b04eb06b2034fad566498d430a6a0829dc7f0ae0e0217b00a487612845bec127ec9              852 Packages.gz
+ c8384b29b2b0b044b473916ba5e9e29f9f48441a5b3e7fde6d4b03f17dda92915654eabb68af095585f2f8ac438dd14795ba9c7d3e89e9c3611c3c32352265f0               98 Release
+ ffe65a35cf608d10939aafe6e5da3b5cc0fb557ca65142e2b4c092f473c28a98ccbe65743b387361dac6a416d101b91f79f009debcd1745a2fcf5eb8171a3b8e             2338 dists/nightly/Release
  cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e                0 dists/nightly/main/binary-all/Packages
- a28c8964eb9ab329eda71b3861db6ece277bf8d459659d21a1b1d4c2d829828d11e926ebe97a9df91ca07214363d589867066c7872eb14c6a7bc310a91795ac6               29 dists/nightly/main/binary-all/Packages.gz
- bbf4424979bc910c6d7a29edd5ec7bada3f26a6f4a82479739911ebff2f4babdfffecfc29840f35f8cf45fd8ed110b2c0e58a9d70236dbcdaa32718b98818614             2727 dists/nightly/main/binary-amd64/Packages
- 8d65dcd73f27b932667779c2d7f05bdf3d29c85f7964b798cafd1a79e83a78cf3f11cbbb17a6393a4d36eb534c9f287043ba219489140199f2a653e6d7f18c3d             1071 dists/nightly/main/binary-amd64/Packages.gz
- 56f3e1b0b51b5576c3781aee3904903b99c41e25f4eb65f4292329159108aaa834d506dd02d156403c27192fa377b86257a8b7c425127decaad9ad9abe1ae532             2336 dists/stable/Release
+ aac5f8f32f05a50eef99b474e13921965a7d33dedb2045b515ad641f529de66d6974f992fda26543e6dece788ea39915ff0f27fea267695c3193dab4ed2612e3               29 dists/nightly/main/binary-all/Packages.gz
+ 2c200ffaa8ce2c582e31a7d9dfc4abb52ab681156ffb505b1ad26aeb86c63d6f142cdcb4e6bb6503778510eea29bbad4492c5eca68e9e5e559755ddeccf6d0bb             1046 dists/nightly/main/binary-amd64/Packages
+ fb36e75fc1f497b6cbcc1587d073ff2f0f00fbe683649c3f052516d00d8ae5e24255b0362f33c7bfb6d69aa68f0bff111915a620f00d99c288e22ddfa4ad3876              625 dists/nightly/main/binary-amd64/Packages.gz
+ b5a0d784444866f633f4a2c46fc454fc0b1d269c43943502af2a0939212942a67fa594d98a41421da12754f6b930eae1bfcbf3a98c35d64ec5b6ce5d586c6ebf             2336 dists/stable/Release
  cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e                0 dists/stable/main/binary-all/Packages
- a28c8964eb9ab329eda71b3861db6ece277bf8d459659d21a1b1d4c2d829828d11e926ebe97a9df91ca07214363d589867066c7872eb14c6a7bc310a91795ac6               29 dists/stable/main/binary-all/Packages.gz
- bbf4424979bc910c6d7a29edd5ec7bada3f26a6f4a82479739911ebff2f4babdfffecfc29840f35f8cf45fd8ed110b2c0e58a9d70236dbcdaa32718b98818614             2727 dists/stable/main/binary-amd64/Packages
- 8d65dcd73f27b932667779c2d7f05bdf3d29c85f7964b798cafd1a79e83a78cf3f11cbbb17a6393a4d36eb534c9f287043ba219489140199f2a653e6d7f18c3d             1071 dists/stable/main/binary-amd64/Packages.gz
+ e9818f0acf48048b565f3d2a94c4bbad835219756fce5fd8088e6bf17620956c3985ec0f1fb14e59d10a0c0e2c03bdec4c36961c18615a4a4d60ba3c71ef6ae7               29 dists/stable/main/binary-all/Packages.gz
+ 1669b4d6a0f9444fcd01c55122c24823320bd46020bf572460cf697f18c4baa260a3902c513707fc3e02c9c5316b044d6569fd132af026af3d0158d35d68ae95              907 dists/stable/main/binary-amd64/Packages
+ c4374c058b70035fca997a12cf43ca69fb231b41ab2e7573e127deb2a7104afe8b9fbf3c20163a876ccd3242b5449486b4e539a4de505bd3f91f38166d0ae0cc              573 dists/stable/main/binary-amd64/Packages.gz
