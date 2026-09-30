@@ -498,6 +498,11 @@ int inst_unpack_deb(struct d99_ctx *c, const char *deb,
         printf("Preparing to unpack %s ...\n", deb);
         printf("Unpacking %s (%s) ...\n", np->name, np->version);
     }
+    {
+        char desc[128];
+        snprintf(desc, sizeof desc, "Unpacking %s", np->name);
+        d99_inst_update_progress(c, desc);
+    }
 
     /* ---- preinst ---- */
     {
@@ -665,6 +670,11 @@ static int inst_configure(struct d99_ctx *c, const char *name)
     if (isatty(STDOUT_FILENO))
         printf("\r\033[K");
     printf("Setting up %s (%s) ...\n", p->name, p->version ? p->version : "");
+    {
+        char desc[128];
+        snprintf(desc, sizeof desc, "Setting up %s", p->name);
+        d99_inst_update_progress(c, desc);
+    }
     args[na++] = (char *)"configure";
     if (oldver)
         args[na++] = oldver;
@@ -695,10 +705,12 @@ static void print_dpkg_progress(size_t cur, size_t total, const char *action_des
     const char *env_e = getenv("D99_PROGRESS_END");
     if (env_s) p_start = atoi(env_s);
     if (env_e) p_end = atoi(env_e);
-    if (p_end <= p_start) p_end = 100;
+    else p_end = 100;
+    if (p_end < p_start) p_end = p_start;
 
-    int pct = p_start + (int)((cur * (p_end - p_start)) / (total ? total : 1));
+    int pct = (total == 0) ? p_end : (p_start + (int)((cur * (p_end - p_start)) / total));
     if (pct > 100) pct = 100;
+    if (pct < 0) pct = 0;
 
     if (getenv("D99_JSON")) {
         printf("{\"event\":\"progress\",\"phase\":\"dpkg\",\"action\":\"%s\",\"current\":%zu,\"total\":%zu,\"percent\":%d}\n",
@@ -707,7 +719,7 @@ static void print_dpkg_progress(size_t cur, size_t total, const char *action_des
         return;
     }
 
-    if (!isatty(STDOUT_FILENO) || total == 0) return;
+    if (!isatty(STDOUT_FILENO)) return;
     int width = 24;
     int filled = (pct * width) / 100;
     printf("\r\033[KProgress: [%3d%%] [", pct);
@@ -717,11 +729,17 @@ static void print_dpkg_progress(size_t cur, size_t total, const char *action_des
         printf("] %s", action_desc);
     else
         printf("]");
-    if (pct >= 100)
+    if (cur >= total && pct >= 100)
         putchar('\n');
     else
         putchar('\r');
     fflush(stdout);
+}
+
+void d99_inst_update_progress(struct d99_ctx *c, const char *action_desc)
+{
+    if (c && c->total_steps > 0)
+        print_dpkg_progress(c->cur_step, c->total_steps, action_desc);
 }
 
 /* shared file-removal helper; keep_conffiles: 0 on purge */
@@ -805,6 +823,11 @@ static int inst_remove(struct d99_ctx *c, const char *name)
     if (isatty(STDOUT_FILENO))
         printf("\r\033[K");
     printf("Removing %s (%s) ...\n", p->name, p->version ? p->version : "");
+    {
+        char desc[128];
+        snprintf(desc, sizeof desc, "Removing %s", p->name);
+        d99_inst_update_progress(c, desc);
+    }
     if (d99_state_next(p->state, D99_EVT_REMOVE, &next) != 0) {
         fprintf(stderr, "d99-inst: cannot remove '%s' in state '%s'\n",
                 name, d99_state_name(p->state));
@@ -856,6 +879,11 @@ static int inst_purge(struct d99_ctx *c, const char *name)
     if (isatty(STDOUT_FILENO))
         printf("\r\033[K");
     printf("Purging configuration files for %s (%s) ...\n", p->name, p->version ? p->version : "");
+    {
+        char desc[128];
+        snprintf(desc, sizeof desc, "Purging %s", p->name);
+        d99_inst_update_progress(c, desc);
+    }
     if (p->state != D99_PS_CONFIGFILES && p->state != D99_PS_NOTINSTALLED) {
         char *args[2];
         /* fully remove first (policy: prerm remove, then purge conffiles) */
@@ -1203,34 +1231,37 @@ int main(int argc, char **argv)
             d99_ar_close(ar);
         }
 
-        size_t total_steps = ops.n + (act == A_INSTALL ? nbatch : 0);
-        size_t cur_step = 0;
+        c.total_steps = ops.n + (act == A_INSTALL ? nbatch : 0);
+        c.cur_step = 0;
 
         for (k = 0; k < ops.n; k++) {
-            if (inst_unpack_deb(&c, ops.v[k], batch, nbatch) != 0)
-                rc = 1;
-            cur_step++;
             char desc[128];
             snprintf(desc, sizeof desc, "Unpacking %s", (k < nbatch && batch[k]->name) ? batch[k]->name : "");
-            print_dpkg_progress(cur_step, total_steps, desc);
+            d99_inst_update_progress(&c, desc);
+            if (inst_unpack_deb(&c, ops.v[k], batch, nbatch) != 0)
+                rc = 1;
+            c.cur_step++;
+            d99_inst_update_progress(&c, desc);
         }
 
         if (act == A_INSTALL) {
             /* configure in argument order */
             for (k = 0; k < nbatch; k++) {
                 if (batch[k]->name) {
-                    if (inst_configure(&c, batch[k]->name) != 0)
-                        rc = 1;
-                    cur_step++;
                     char desc[128];
                     snprintf(desc, sizeof desc, "Setting up %s", batch[k]->name);
-                    print_dpkg_progress(cur_step, total_steps, desc);
+                    d99_inst_update_progress(&c, desc);
+                    if (inst_configure(&c, batch[k]->name) != 0)
+                        rc = 1;
+                    c.cur_step++;
+                    d99_inst_update_progress(&c, desc);
                 }
             }
         }
         if (!no_triggers && act == A_INSTALL)
             if (triggers_process(&c) != 0)
                 rc = 1;
+        print_dpkg_progress(c.total_steps, c.total_steps, "");
         d99_arena_free(bar);
         free(batch);
         break;
@@ -1241,17 +1272,21 @@ int main(int argc, char **argv)
             rc = 2;
             break;
         }
-        size_t total_steps = ops.n;
+        c.total_steps = ops.n;
+        c.cur_step = 0;
         for (i = 0; (size_t)i < ops.n; i++) {
-            if (inst_configure(&c, ops.v[i]) != 0)
-                rc = 1;
             char desc[128];
             snprintf(desc, sizeof desc, "Setting up %s", ops.v[i]);
-            print_dpkg_progress(i + 1, total_steps, desc);
+            d99_inst_update_progress(&c, desc);
+            if (inst_configure(&c, ops.v[i]) != 0)
+                rc = 1;
+            c.cur_step++;
+            d99_inst_update_progress(&c, desc);
         }
         if (!no_triggers)
             if (triggers_process(&c) != 0)
                 rc = 1;
+        print_dpkg_progress(c.total_steps, c.total_steps, "");
         break;
     }
     case A_REMOVE:
@@ -1261,8 +1296,12 @@ int main(int argc, char **argv)
             rc = 2;
             break;
         }
-        size_t total_steps = ops.n;
+        c.total_steps = ops.n;
+        c.cur_step = 0;
         for (i = 0; (size_t)i < ops.n; i++) {
+            char desc[128];
+            snprintf(desc, sizeof desc, act == A_PURGE ? "Purging %s" : "Removing %s", ops.v[i]);
+            d99_inst_update_progress(&c, desc);
             if (act == A_PURGE) {
                 if (inst_purge(&c, ops.v[i]) != 0)
                     rc = 1;
@@ -1270,10 +1309,10 @@ int main(int argc, char **argv)
                 if (inst_remove(&c, ops.v[i]) != 0)
                     rc = 1;
             }
-            char desc[128];
-            snprintf(desc, sizeof desc, act == A_PURGE ? "Purging %s" : "Removing %s", ops.v[i]);
-            print_dpkg_progress(i + 1, total_steps, desc);
+            c.cur_step++;
+            d99_inst_update_progress(&c, desc);
         }
+        print_dpkg_progress(c.total_steps, c.total_steps, "");
         break;
     }
     default:

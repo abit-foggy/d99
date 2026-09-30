@@ -1306,7 +1306,6 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
     char **av;
     int na = 0, rc;
     char *ro = NULL;
-    int all_pipelined = 0;
 
     if (g_json_mode) {
         printf("{\"event\":\"start\",\"command\":\"install\"}\n");
@@ -1421,16 +1420,11 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
                 workers[w].idx = 0;
             }
 
-            size_t *unpack_queue = d99_xmalloc(nacts * sizeof(size_t));
-            size_t uq_head = 0, uq_tail = 0;
-            pid_t unpack_pid = 0;
-            int pipelined_unpack = (!download_only && strcmp(p->root, "/") == 0 && geteuid() == 0);
-
             struct timeval t_start, t_now;
             gettimeofday(&t_start, NULL);
             off_t total_bytes_fetched = 0;
 
-            while (next_pkg < nacts || n_running > 0 || (pipelined_unpack && (unpack_pid > 0 || uq_head < uq_tail))) {
+            while (next_pkg < nacts || n_running > 0) {
                 while (n_running < D99_MAX_DOWNLOAD_WORKERS && next_pkg < nacts) {
                     size_t cur = next_pkg++;
                     action *a;
@@ -1461,8 +1455,6 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
                         }
                         chmod(dests[cur], 0644);
                         total_bytes_fetched += atoll(a->size ? a->size : "0");
-                        if (pipelined_unpack)
-                            unpack_queue[uq_tail++] = cur;
                     } else if (pid == 0) {
                         int fret = d99_fetch(urls[cur], dests[cur], 0);
                         _exit(fret == 0 ? 0 : 1);
@@ -1478,31 +1470,10 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
                     }
                 }
 
-                if (pipelined_unpack && unpack_pid == 0 && uq_head < uq_tail && rc == 0) {
-                    size_t uidx = unpack_queue[uq_head++];
-                    backup_old_package(p, acts[uidx].name, acts[uidx].old_version);
-                    unpack_pid = fork();
-                    if (unpack_pid == 0) {
-                        char p_start_s[16], p_end_s[16];
-                        int start_p = 50 + (int)((uidx * 25) / nacts);
-                        int end_p = 50 + (int)(((uidx + 1) * 25) / nacts);
-                        snprintf(p_start_s, sizeof p_start_s, "%d", start_p);
-                        snprintf(p_end_s, sizeof p_end_s, "%d", end_p);
-                        setenv("D99_PROGRESS_START", p_start_s, 1);
-                        setenv("D99_PROGRESS_END", p_end_s, 1);
-                        char *ro_arg = (strcmp(p->root, "/") != 0) ? d99_xasprintf("--root=%s", p->root) : NULL;
-                        if (ro_arg)
-                            execl(inst, inst, ro_arg, "--unpack", "--force-depends", dests[uidx], (char *)NULL);
-                        else
-                            execl(inst, inst, "--unpack", "--force-depends", dests[uidx], (char *)NULL);
-                        _exit(127);
-                    }
-                }
-
                 if (rc != 0)
                     break;
 
-                if (n_running > 0 || (pipelined_unpack && unpack_pid > 0)) {
+                if (n_running > 0) {
                     int status = 0;
                     pid_t done_pid = waitpid(-1, &status, WNOHANG);
                     if (done_pid == 0) {
@@ -1540,40 +1511,31 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
                         continue;
                     }
                     if (done_pid > 0) {
-                        if (pipelined_unpack && done_pid == unpack_pid) {
-                            unpack_pid = 0;
-                            if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
-                                pipelined_unpack = 0;
-                        } else {
-                            for (w = 0; w < D99_MAX_DOWNLOAD_WORKERS; w++) {
-                                if (workers[w].pid == done_pid) {
-                                    size_t idx = workers[w].idx;
-                                    action *a = &acts[idx];
-                                    workers[w].pid = 0;
-                                    n_running--;
-                                    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-                                        fprintf(stderr, "d99-solve: failed to fetch %s\n", urls[idx]);
-                                        unlink(dests[idx]);
-                                        rc = 1;
-                                    } else if (*a->sha256 && !verify_sha(dests[idx], a->sha256)) {
-                                        fprintf(stderr, "d99-solve: sha256 mismatch for %s\n", urls[idx]);
-                                        unlink(dests[idx]);
-                                        rc = 1;
-                                    } else {
-                                        chmod(dests[idx], 0644);
-                                        total_bytes_fetched += atoll(a->size ? a->size : "0");
-                                        if (pipelined_unpack)
-                                            unpack_queue[uq_tail++] = idx;
-                                    }
-                                    break;
+                        for (w = 0; w < D99_MAX_DOWNLOAD_WORKERS; w++) {
+                            if (workers[w].pid == done_pid) {
+                                size_t idx = workers[w].idx;
+                                action *a = &acts[idx];
+                                workers[w].pid = 0;
+                                n_running--;
+                                if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+                                    fprintf(stderr, "d99-solve: failed to fetch %s\n", urls[idx]);
+                                    unlink(dests[idx]);
+                                    rc = 1;
+                                } else if (*a->sha256 && !verify_sha(dests[idx], a->sha256)) {
+                                    fprintf(stderr, "d99-solve: sha256 mismatch for %s\n", urls[idx]);
+                                    unlink(dests[idx]);
+                                    rc = 1;
+                                } else {
+                                    chmod(dests[idx], 0644);
+                                    total_bytes_fetched += atoll(a->size ? a->size : "0");
                                 }
+                                break;
                             }
                         }
                     }
                 }
             }
 
-            all_pipelined = (pipelined_unpack && uq_head == (size_t)nacts && rc == 0);
             if (!g_json_mode && isatty(STDOUT_FILENO))
                 printf("\r\033[K");
             gettimeofday(&t_now, NULL);
@@ -1592,7 +1554,6 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
                         printf("Fetched %.1f kB in %.1fs (%.1f kB/s)\n", total_bytes_fetched / 1024.0, elap, kbps);
                 }
             }
-            free(unpack_queue);
 
             if (rc != 0) {
                 for (w = 0; w < D99_MAX_DOWNLOAD_WORKERS; w++) {
@@ -1624,60 +1585,42 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
     if (print_uris || download_only)
         goto out;
 
-    log_history(p->log_file, cmd_name, acts, nacts, 1);
-
-    if (all_pipelined) {
-        av = d99_xmalloc(((size_t)nacts + 8) * sizeof(char *));
-        av[na++] = inst;
-        if (strcmp(p->root, "/") != 0) {
-            ro = d99_xasprintf("--root=%s", p->root);
-            av[na++] = ro;
-        }
-        av[na++] = (char *)"--configure";
-        for (i = 0; i < nacts; i++)
-            av[na++] = acts[i].name;
-        av[na] = NULL;
-        setenv("D99_PROGRESS_START", "75", 1);
-        setenv("D99_PROGRESS_END", "100", 1);
-        rc = run_inst(av);
-        unsetenv("D99_PROGRESS_START");
-        unsetenv("D99_PROGRESS_END");
-        free(av);
-        free(ro);
-        ro = NULL;
-    } else {
-        av = d99_xmalloc((files.n + 8) * sizeof(char *));
-        av[na++] = inst;
-        if (strcmp(p->root, "/") != 0) {
-            ro = d99_xasprintf("--root=%s", p->root);
-            av[na++] = ro;
-        }
-        av[na++] = (char *)"-i";
-        for (i = 0; i < files.n; i++)
-            av[na++] = files.v[i];
-        av[na] = NULL;
-        if (total_size > 0) {
-            setenv("D99_PROGRESS_START", "50", 1);
-            setenv("D99_PROGRESS_END", "100", 1);
-        } else {
-            setenv("D99_PROGRESS_START", "0", 1);
-            setenv("D99_PROGRESS_END", "100", 1);
-        }
-        if (g_json_mode)
-            setenv("D99_JSON", "1", 1);
-        rc = run_inst(av);
-        if (g_json_mode)
-            unsetenv("D99_JSON");
-        unsetenv("D99_PROGRESS_START");
-        unsetenv("D99_PROGRESS_END");
-        free(av);
-        free(ro);
-        ro = NULL;
+    for (i = 0; i < nacts; i++) {
+        if (acts[i].old_version)
+            backup_old_package(p, acts[i].name, acts[i].old_version);
     }
 
+    log_history(p->log_file, cmd_name, acts, nacts, 1);
+
+    av = d99_xmalloc((files.n + 8) * sizeof(char *));
+    av[na++] = inst;
+    if (strcmp(p->root, "/") != 0) {
+        ro = d99_xasprintf("--root=%s", p->root);
+        av[na++] = ro;
+    }
+    av[na++] = (char *)"-i";
+    for (i = 0; i < files.n; i++)
+        av[na++] = files.v[i];
+    av[na] = NULL;
+    if (total_size > 0) {
+        setenv("D99_PROGRESS_START", "50", 1);
+        setenv("D99_PROGRESS_END", "100", 1);
+    } else {
+        setenv("D99_PROGRESS_START", "0", 1);
+        setenv("D99_PROGRESS_END", "100", 1);
+    }
+    if (g_json_mode)
+        setenv("D99_JSON", "1", 1);
+    rc = run_inst(av);
+    if (g_json_mode)
+        unsetenv("D99_JSON");
+    unsetenv("D99_PROGRESS_START");
+    unsetenv("D99_PROGRESS_END");
+    free(av);
+    free(ro);
+    ro = NULL;
+
     if (rc == 0) {
-        if (!g_json_mode && isatty(STDOUT_FILENO))
-            printf("\r\033[KProgress: [100%%] [########################] Complete\n");
         log_history(p->log_file, cmd_name, acts, nacts, 0);
         for (i = 0; i < nacts; i++) {
             int is_manual = 0;

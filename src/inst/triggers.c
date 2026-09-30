@@ -140,6 +140,11 @@ int triggers_process(struct d99_ctx *c)
                             if (isatty(STDOUT_FILENO))
                                 printf("\r\033[K");
                             printf("Processing triggers for %s (%s) ...\n", owner, pp->version ? pp->version : "");
+                            {
+                                char desc[128];
+                                snprintf(desc, sizeof desc, "Processing triggers for %s", owner);
+                                d99_inst_update_progress(c, desc);
+                            }
                             if (hook_run(c, owner, pp->version, pp->arch,
                                          "postinst", targs) != 0) {
                                 d99_warn("trigger processing script for "

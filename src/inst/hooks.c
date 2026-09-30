@@ -25,6 +25,11 @@ int hook_run(struct d99_ctx *c, const char *pkg, const char *version,
     }
     d99_verbose("running %s for %s", path, pkg);
 
+    if (isatty(STDOUT_FILENO)) {
+        printf("\r\033[K");
+        fflush(stdout);
+    }
+
     pid = fork();
     if (pid < 0) {
         d99_warn("fork failed: %s", strerror(errno));
@@ -70,6 +75,11 @@ int hook_run(struct d99_ctx *c, const char *pkg, const char *version,
         return -1;
     }
     free(path);
+    if (c->total_steps > 0) {
+        char desc[128];
+        snprintf(desc, sizeof desc, "Running %s for %s", script, pkg);
+        d99_inst_update_progress(c, desc);
+    }
     if (WIFEXITED(status)) {
         int rc = WEXITSTATUS(status);
         if (rc == 127)

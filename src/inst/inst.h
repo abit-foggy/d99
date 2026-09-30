@@ -13,7 +13,11 @@ struct d99_ctx {
     int force_depends;
     int force_configure;
     struct d99_diversions *div;
+    size_t cur_step;
+    size_t total_steps;
 };
+
+void d99_inst_update_progress(struct d99_ctx *c, const char *action_desc);
 
 int inst_unpack_deb(struct d99_ctx *c, const char *deb,
                     struct d99_pkg **batch, size_t nbatch);
