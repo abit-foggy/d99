@@ -246,7 +246,7 @@ static void write_md5sums_verify(struct d99_ctx *c, const char *pkg,
             char want[33];
             char got[33];
             size_t hl = (size_t)(sp - line);
-            if (hl > 0 && hl < 32) {
+            if (hl > 0 && hl <= 32) {
                 memcpy(want, line, hl);
                 want[hl] = '\0';
                 path = d99_trim(sp + 2);
@@ -293,7 +293,7 @@ int inst_unpack_deb(struct d99_ctx *c, const char *deb,
         char name[128];
         char *buf;
         size_t size;
-    } ctrl_entries[32];
+    } ctrl_entries[64];
     size_t n_ctrl = 0, ci;
 
     d = member_decomp(ar, &ctrl);
@@ -318,8 +318,9 @@ int inst_unpack_deb(struct d99_ctx *c, const char *deb,
                 ctrl_text = NULL;
             }
         } else if (n_ctrl < sizeof(ctrl_entries) / sizeof(ctrl_entries[0])) {
-            char *buf = d99_xmalloc((size_t)m.size ? (size_t)m.size : 1);
+            char *buf = d99_xmalloc((size_t)m.size + 1);
             if (d99_tar_read_data(t, buf, (size_t)m.size) == 0) {
+                buf[m.size] = '\0';
                 size_t nl = strlen(name);
                 if (nl >= sizeof(ctrl_entries[n_ctrl].name))
                     nl = sizeof(ctrl_entries[n_ctrl].name) - 1;

@@ -467,9 +467,21 @@ char *d99_read_file(const char *path, size_t *len)
     buf = d99_xmalloc(cap + 1);
     for (;;) {
         ssize_t r;
-        if (total + 1 > cap) {
+        if (total == cap) {
+            char extra;
+            r = read(fd, &extra, 1);
+            if (r < 0) {
+                if (errno == EINTR)
+                    continue;
+                free(buf);
+                close(fd);
+                return NULL;
+            }
+            if (r == 0)
+                break;
             cap = cap * 2 + 65536;
             buf = d99_xrealloc(buf, cap + 1);
+            buf[total++] = extra;
         }
         r = read(fd, buf + total, cap - total);
         if (r < 0) {
