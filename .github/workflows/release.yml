@@ -26,15 +26,12 @@ jobs:
 
       - name: Package release
         run: |
-          tar -czf "d99-${GITHUB_REF_NAME}-linux-amd64.tar.gz" -C output/bin d99-deb d99-query d99-inst d99-solve d99-build
           tar -czf d99-linux-amd64.tar.gz -C output/bin d99-deb d99-query d99-inst d99-solve d99-build
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          name: d99 ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           draft: false
           prerelease: false
-          files: |
-            d99-${{ github.ref_name }}-linux-amd64.tar.gz
-            d99-linux-amd64.tar.gz
+          files: d99-linux-amd64.tar.gz
