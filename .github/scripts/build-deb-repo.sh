@@ -56,12 +56,31 @@ Priority: optional
 Architecture: amd64
 Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
 Depends: libc6, zlib1g, liblzma5, libzstd1
+Provides: d99-nightly
 Description: Debian packaging toolchain in C99 (Nightly snapshot)
  d99 is a lightweight Debian packaging toolchain implemented in C99,
  providing d99-deb, d99-query, d99-inst, d99-solve, and d99-build.
  Nightly builds track main development snapshots and out-version stable.
 EOF
 dpkg-deb -b "${STAGE_DIR}" "${REPO_DIR}/pool/main/d/d99/d99_${NIGHTLY_VER}_amd64.deb"
+rm -rf "${STAGE_DIR}"
+
+# 2b. Build and package d99-nightly metapackage
+echo "==> Building d99-nightly package (${NIGHTLY_VER})..."
+STAGE_DIR="$(mktemp -d /tmp/d99-deb-nightly-meta.XXXXXX)"
+mkdir -p "${STAGE_DIR}/DEBIAN"
+cat > "${STAGE_DIR}/DEBIAN/control" <<EOF
+Package: d99-nightly
+Version: ${NIGHTLY_VER}
+Section: utils
+Priority: optional
+Architecture: all
+Maintainer: abit-foggy <https://github.com/abit-foggy/d99>
+Depends: d99 (= ${NIGHTLY_VER})
+Description: Debian packaging toolchain in C99 (Nightly tracking package)
+ Metapackage depending on the latest d99 nightly snapshot build.
+EOF
+dpkg-deb -b "${STAGE_DIR}" "${REPO_DIR}/pool/main/d/d99/d99-nightly_${NIGHTLY_VER}_all.deb"
 rm -rf "${STAGE_DIR}"
 
 # Copy deb files to repo root as well so flat path './' works directly
