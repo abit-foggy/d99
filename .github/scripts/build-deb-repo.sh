@@ -45,7 +45,7 @@ cat > "${STAGE_DIR}/DEBIAN/postinst" <<'EOF'
 set -e
 
 # Link standard tools in /usr/bin to d99 implementations
-for tool in apt:d99-solve apt-get:d99-solve dpkg:d99-inst dpkg-deb:d99-deb dpkg-query:d99-query; do
+for tool in apt:d99-solve apt-get:d99-solve apt-mark:d99-solve dpkg:d99-inst dpkg-deb:d99-deb dpkg-query:d99-query; do
     src="${tool%%:*}"
     dst="${tool##*:}"
     
@@ -103,7 +103,7 @@ cat > "${STAGE_DIR}/DEBIAN/postinst" <<'EOF'
 set -e
 
 # Link standard tools in /usr/bin to d99 implementations
-for tool in apt:d99-solve apt-get:d99-solve dpkg:d99-inst dpkg-deb:d99-deb dpkg-query:d99-query; do
+for tool in apt:d99-solve apt-get:d99-solve apt-mark:d99-solve dpkg:d99-inst dpkg-deb:d99-deb dpkg-query:d99-query; do
     src="${tool%%:*}"
     dst="${tool##*:}"
     

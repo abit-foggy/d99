@@ -168,16 +168,26 @@ d99_decomp *d99_decomp_open_region(FILE *f, long long off, long long size, int f
     }
 #endif
 #if HAVE_ZSTD
-    case D99_CFMT_ZST:
+    case D99_CFMT_ZST: {
+        long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
+        if (nprocs < 1) nprocs = 1;
+        if (nprocs > 8) nprocs = 8;
         d->zs = ZSTD_createDStream();
-        if (!d->zs || ZSTD_isError(ZSTD_initDStream(d->zs))) {
-            if (d->zs)
-                ZSTD_freeDStream(d->zs);
+        if (!d->zs) {
+            free(d);
+            return NULL;
+        }
+#ifdef ZSTD_d_nbWorkers
+        ZSTD_DCtx_setParameter(d->zs, ZSTD_d_nbWorkers, (int)nprocs);
+#endif
+        if (ZSTD_isError(ZSTD_initDStream(d->zs))) {
+            ZSTD_freeDStream(d->zs);
             free(d);
             return NULL;
         }
         d->zs_open = 1;
-        d->zinbuf_n = ZSTD_DStreamInSize();
+        d->zinbuf_n = ZSTD_DStreamInSize() * 2;
+        if (d->zinbuf_n < 131072) d->zinbuf_n = 131072;
         d->zinbuf = d99_xmalloc(d->zinbuf_n);
         d->f = f;
         if (fseeko(f, off, SEEK_SET) != 0) {
@@ -185,6 +195,7 @@ d99_decomp *d99_decomp_open_region(FILE *f, long long off, long long size, int f
             return NULL;
         }
         return d;
+    }
 #endif
     default:
         free(d);
@@ -432,10 +443,20 @@ int d99_compress_file(const char *src, const char *dst, int fmt)
 #if HAVE_LIBLZMA
     case D99_CFMT_XZ: {
         lzma_stream xs = LZMA_STREAM_INIT;
+        lzma_mt mt;
+        long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
         FILE *out;
-        if (lzma_easy_encoder(&xs, 6, LZMA_CHECK_CRC32) != LZMA_OK) {
-            fclose(in);
-            return -1;
+        if (nprocs < 1) nprocs = 1;
+        if (nprocs > 8) nprocs = 8;
+        memset(&mt, 0, sizeof(mt));
+        mt.threads = (uint32_t)nprocs;
+        mt.preset = 6;
+        mt.check = LZMA_CHECK_CRC32;
+        if (lzma_stream_encoder_mt(&xs, &mt) != LZMA_OK) {
+            if (lzma_easy_encoder(&xs, 6, LZMA_CHECK_CRC32) != LZMA_OK) {
+                fclose(in);
+                return -1;
+            }
         }
         out = fopen(dst, "wb");
         if (!out) {
@@ -486,11 +507,20 @@ int d99_compress_file(const char *src, const char *dst, int fmt)
 #endif
 #if HAVE_ZSTD
     case D99_CFMT_ZST: {
+        long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
+        if (nprocs < 1) nprocs = 1;
+        if (nprocs > 8) nprocs = 8;
         ZSTD_CStream *zcs = ZSTD_createCStream();
         FILE *out;
-        if (!zcs || ZSTD_isError(ZSTD_initCStream(zcs, 3))) {
-            if (zcs)
-                ZSTD_freeCStream(zcs);
+        if (!zcs) {
+            fclose(in);
+            return -1;
+        }
+#ifdef ZSTD_c_nbWorkers
+        ZSTD_CCtx_setParameter(zcs, ZSTD_c_nbWorkers, (int)nprocs);
+#endif
+        if (ZSTD_isError(ZSTD_initCStream(zcs, 3))) {
+            ZSTD_freeCStream(zcs);
             fclose(in);
             return -1;
         }

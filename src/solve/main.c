@@ -12,14 +12,23 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <fcntl.h>
+#include <sys/time.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 /* ==================== paths ==================== */
 
 typedef struct {
     char *root, *lists_dir, *cache_dir, *sources_file, *sources_dir, *admindir;
+    char *log_file, *backups_dir, *ext_states;
 } paths;
+
+struct action;
+static void backup_old_package(paths *p, const char *pkg_name, const char *old_ver);
+static void log_history(const char *log_path, const char *cmdline, struct action *acts, size_t nacts, int is_start);
+static void ext_states_set(const char *path, const char *pkg_name, const char *arch, int auto_installed);
 
 static void paths_init(paths *p, const char *root)
 {
@@ -29,6 +38,22 @@ static void paths_init(paths *p, const char *root)
     p->sources_file = d99_path_join(root, "etc/apt/sources.list");
     p->sources_dir = d99_path_join(root, "etc/apt/sources.list.d");
     p->admindir = d99_path_join(root, "var/lib/dpkg");
+    p->log_file = d99_path_join(root, "var/log/d99/history.log");
+    p->backups_dir = d99_path_join(root, "var/backups/d99");
+    p->ext_states = d99_path_join(root, "var/lib/apt/extended_states");
+}
+
+static void paths_free(paths *p)
+{
+    free(p->root);
+    free(p->lists_dir);
+    free(p->cache_dir);
+    free(p->sources_file);
+    free(p->sources_dir);
+    free(p->admindir);
+    free(p->log_file);
+    free(p->backups_dir);
+    free(p->ext_states);
 }
 
 /* ==================== sources.list ==================== */
@@ -650,7 +675,7 @@ static int parse_target(const char *s, struct target_spec *t)
     return 0;
 }
 
-typedef struct {
+typedef struct action {
     char *name, *version, *arch;
     char *filename, *sha256, *size, *base_uri, *summary;
     char *old_version;   /* NULL for a fresh install */
@@ -1308,7 +1333,16 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
                 workers[w].idx = 0;
             }
 
-            while (next_pkg < nacts || n_running > 0) {
+            size_t *unpack_queue = d99_xmalloc(nacts * sizeof(size_t));
+            size_t uq_head = 0, uq_tail = 0;
+            pid_t unpack_pid = 0;
+            int pipelined_unpack = (!download_only && strcmp(p->root, "/") == 0 && geteuid() == 0);
+
+            struct timeval t_start, t_now;
+            gettimeofday(&t_start, NULL);
+            off_t total_bytes_fetched = 0;
+
+            while (next_pkg < nacts || n_running > 0 || (pipelined_unpack && (unpack_pid > 0 || uq_head < uq_tail))) {
                 while (n_running < D99_MAX_DOWNLOAD_WORKERS && next_pkg < nacts) {
                     size_t cur = next_pkg++;
                     action *a;
@@ -1336,6 +1370,9 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
                             break;
                         }
                         chmod(dests[cur], 0644);
+                        total_bytes_fetched += atoll(a->size ? a->size : "0");
+                        if (pipelined_unpack)
+                            unpack_queue[uq_tail++] = cur;
                     } else if (pid == 0) {
                         int fret = d99_fetch(urls[cur], dests[cur], 0);
                         _exit(fret == 0 ? 0 : 1);
@@ -1351,36 +1388,71 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
                     }
                 }
 
+                if (pipelined_unpack && unpack_pid == 0 && uq_head < uq_tail && rc == 0) {
+                    size_t uidx = unpack_queue[uq_head++];
+                    backup_old_package(p, acts[uidx].name, acts[uidx].old_version);
+                    unpack_pid = fork();
+                    if (unpack_pid == 0) {
+                        char *ro_arg = (strcmp(p->root, "/") != 0) ? d99_xasprintf("--root=%s", p->root) : NULL;
+                        if (ro_arg)
+                            execl(inst, inst, ro_arg, "--unpack", "--force-depends", dests[uidx], (char *)NULL);
+                        else
+                            execl(inst, inst, "--unpack", "--force-depends", dests[uidx], (char *)NULL);
+                        _exit(127);
+                    }
+                }
+
                 if (rc != 0)
                     break;
 
-                if (n_running > 0) {
+                if (n_running > 0 || (pipelined_unpack && unpack_pid > 0)) {
                     int status = 0;
                     pid_t done_pid = waitpid(-1, &status, 0);
                     if (done_pid > 0) {
-                        for (w = 0; w < D99_MAX_DOWNLOAD_WORKERS; w++) {
-                            if (workers[w].pid == done_pid) {
-                                size_t idx = workers[w].idx;
-                                action *a = &acts[idx];
-                                workers[w].pid = 0;
-                                n_running--;
-                                if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
-                                    fprintf(stderr, "d99-solve: failed to fetch %s\n", urls[idx]);
-                                    unlink(dests[idx]);
-                                    rc = 1;
-                                } else if (*a->sha256 && !verify_sha(dests[idx], a->sha256)) {
-                                    fprintf(stderr, "d99-solve: sha256 mismatch for %s\n", urls[idx]);
-                                    unlink(dests[idx]);
-                                    rc = 1;
-                                } else {
-                                    chmod(dests[idx], 0644);
+                        if (pipelined_unpack && done_pid == unpack_pid) {
+                            unpack_pid = 0;
+                            if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+                                pipelined_unpack = 0;
+                        } else {
+                            for (w = 0; w < D99_MAX_DOWNLOAD_WORKERS; w++) {
+                                if (workers[w].pid == done_pid) {
+                                    size_t idx = workers[w].idx;
+                                    action *a = &acts[idx];
+                                    workers[w].pid = 0;
+                                    n_running--;
+                                    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+                                        fprintf(stderr, "d99-solve: failed to fetch %s\n", urls[idx]);
+                                        unlink(dests[idx]);
+                                        rc = 1;
+                                    } else if (*a->sha256 && !verify_sha(dests[idx], a->sha256)) {
+                                        fprintf(stderr, "d99-solve: sha256 mismatch for %s\n", urls[idx]);
+                                        unlink(dests[idx]);
+                                        rc = 1;
+                                    } else {
+                                        chmod(dests[idx], 0644);
+                                        total_bytes_fetched += atoll(a->size ? a->size : "0");
+                                        if (pipelined_unpack)
+                                            unpack_queue[uq_tail++] = idx;
+                                    }
+                                    break;
                                 }
-                                break;
                             }
                         }
                     }
                 }
             }
+
+            gettimeofday(&t_now, NULL);
+            double elap = (t_now.tv_sec - t_start.tv_sec) + (t_now.tv_usec - t_start.tv_usec) / 1000000.0;
+            if (elap < 0.001) elap = 0.001;
+            double kbps = (total_bytes_fetched / 1024.0) / elap;
+            if (total_bytes_fetched > 0) {
+                if (total_bytes_fetched >= 1048576)
+                    printf("Fetched %.1f MB in %.1fs (%.1f kB/s)\n", total_bytes_fetched / 1048576.0, elap, kbps);
+                else
+                    printf("Fetched %.1f kB in %.1fs (%.1f kB/s)\n", total_bytes_fetched / 1024.0, elap, kbps);
+            }
+            free(unpack_queue);
 
             if (rc != 0) {
                 for (w = 0; w < D99_MAX_DOWNLOAD_WORKERS; w++) {
@@ -1412,6 +1484,8 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
     if (print_uris || download_only)
         goto out;
 
+    log_history(p->log_file, cmd_name, acts, nacts, 1);
+
     av = d99_xmalloc((files.n + 8) * sizeof(char *));
     av[na++] = inst;
     if (strcmp(p->root, "/") != 0) {
@@ -1426,6 +1500,20 @@ static int cmd_install(const char *argv0, const char *cmd_name, paths *p,
     free(av);
     free(ro);
     ro = NULL;
+
+    if (rc == 0) {
+        log_history(p->log_file, cmd_name, acts, nacts, 0);
+        for (i = 0; i < nacts; i++) {
+            int is_manual = 0;
+            for (int t = 0; t < ntargets; t++) {
+                if (strcmp(targets[t].name, acts[i].name) == 0) {
+                    is_manual = 1;
+                    break;
+                }
+            }
+            ext_states_set(p->ext_states, acts[i].name, acts[i].arch, is_manual ? 0 : 1);
+        }
+    }
 
 out:
     d99_sv_free(&files);
@@ -1479,6 +1567,57 @@ static int cmd_remove_purge(const char *argv0, paths *p, char **names,
     return rc;
 }
 
+/* ==================== Search (Scored & Colorized) ==================== */
+
+struct search_hit {
+    char *name;
+    char *version;
+    char *summary;
+    int score;
+};
+
+static int hit_cmp(const void *a, const void *b)
+{
+    const struct search_hit *ha = a;
+    const struct search_hit *hb = b;
+    if (ha->score != hb->score)
+        return hb->score - ha->score; /* descending score */
+    return strcmp(ha->name, hb->name);
+}
+
+static void print_highlighted(const char *text, const char *term, size_t term_len,
+                              const char *base_color, const char *hl_color, int is_tty)
+{
+    if (!is_tty || !term || !term[0]) {
+        fputs(text, stdout);
+        return;
+    }
+    const char *p = text;
+    fputs(base_color, stdout);
+    while (*p) {
+        const char *match = NULL;
+        const char *cur = p;
+        while (*cur) {
+            if (strncasecmp(cur, term, term_len) == 0) {
+                match = cur;
+                break;
+            }
+            cur++;
+        }
+        if (!match) {
+            fputs(p, stdout);
+            break;
+        }
+        if (match > p)
+            fwrite(p, 1, (size_t)(match - p), stdout);
+        fputs(hl_color, stdout);
+        fwrite(match, 1, term_len, stdout);
+        fputs(base_color, stdout);
+        p = match + term_len;
+    }
+    fputs("\033[0m", stdout);
+}
+
 static int cmd_search(const char *cmd_name, paths *p, const char *term)
 {
     d99_repo *repo = repo_load(p->lists_dir);
@@ -1495,41 +1634,733 @@ static int cmd_search(const char *cmd_name, paths *p, const char *term)
         return 1;
     }
     size_t needle_len = strlen(needle);
+    int is_tty = isatty(STDOUT_FILENO);
+
+    struct search_hit *hits = NULL;
+    size_t nhits = 0, hit_cap = 0;
+
     if (repo->disk_recs && repo->strings) {
         const struct cand_disk_rec *recs = (const struct cand_disk_rec *)repo->disk_recs;
         const char *strings = repo->strings;
         for (i = 0; i < repo->n; i++) {
             const char *name = strings + recs[i].name_off;
             const char *summary = recs[i].summary_off ? strings + recs[i].summary_off : "";
-            int hit = 0;
+            int score = 0;
 
-            if (strstr(name, needle))
-                hit = 1;
-            else if (summary[0] && d99_strcasestr_match(summary, needle, needle_len))
-                hit = 1;
+            if (strcasecmp(name, needle) == 0)
+                score += 1000;
+            else if (strncasecmp(name, needle, needle_len) == 0)
+                score += 500;
+            else if (d99_strcasestr_match(name, needle, needle_len))
+                score += 200;
 
-            if (hit)
-                printf("%s/%s - %s\n", name, strings + recs[i].version_off, summary);
+            if (summary[0] && d99_strcasestr_match(summary, needle, needle_len))
+                score += 50;
+
+            if (score > 0) {
+                if (nhits == hit_cap) {
+                    hit_cap = hit_cap ? hit_cap * 2 : 64;
+                    hits = d99_xrealloc(hits, hit_cap * sizeof(struct search_hit));
+                }
+                hits[nhits].name = d99_xstrdup(name);
+                hits[nhits].version = d99_xstrdup(strings + recs[i].version_off);
+                hits[nhits].summary = d99_xstrdup(summary);
+                hits[nhits].score = score;
+                nhits++;
+            }
         }
     } else {
         for (i = 0; i < repo->n; i++) {
             d99_cand *c = repo_get(repo, i);
-            int hit = 0;
-
             if (!c)
                 continue;
-            if (strstr(c->name, needle))
-                hit = 1;
-            else if (c->summary && d99_strcasestr_match(c->summary, needle, needle_len))
-                hit = 1;
+            const char *name = c->name;
+            const char *summary = c->summary ? c->summary : "";
+            int score = 0;
 
-            if (hit)
-                printf("%s/%s - %s\n", c->name, c->version,
-                       c->summary ? c->summary : "");
+            if (strcasecmp(name, needle) == 0)
+                score += 1000;
+            else if (strncasecmp(name, needle, needle_len) == 0)
+                score += 500;
+            else if (d99_strcasestr_match(name, needle, needle_len))
+                score += 200;
+
+            if (summary[0] && d99_strcasestr_match(summary, needle, needle_len))
+                score += 50;
+
+            if (score > 0) {
+                if (nhits == hit_cap) {
+                    hit_cap = hit_cap ? hit_cap * 2 : 64;
+                    hits = d99_xrealloc(hits, hit_cap * sizeof(struct search_hit));
+                }
+                hits[nhits].name = d99_xstrdup(name);
+                hits[nhits].version = d99_xstrdup(c->version);
+                hits[nhits].summary = d99_xstrdup(summary);
+                hits[nhits].score = score;
+                nhits++;
+            }
         }
     }
+
+    if (nhits > 1)
+        qsort(hits, nhits, sizeof(struct search_hit), hit_cmp);
+
+    for (i = 0; i < nhits; i++) {
+        if (is_tty) {
+            print_highlighted(hits[i].name, needle, needle_len, "\033[1;32m", "\033[1;33;4m", 1);
+            fputs("/", stdout);
+            fputs("\033[36m", stdout);
+            fputs(hits[i].version, stdout);
+            fputs("\033[0m", stdout);
+            if (hits[i].summary && hits[i].summary[0]) {
+                fputs(" - ", stdout);
+                print_highlighted(hits[i].summary, needle, needle_len, "\033[0m", "\033[1;33m", 1);
+            }
+            fputs("\n", stdout);
+        } else {
+            printf("%s/%s - %s\n", hits[i].name, hits[i].version, hits[i].summary);
+        }
+        free(hits[i].name);
+        free(hits[i].version);
+        free(hits[i].summary);
+    }
+    free(hits);
     free(needle);
     repo_free(repo);
+    return 0;
+}
+
+/* ==================== Cache Cleaning ==================== */
+
+static int cmd_clean(paths *p)
+{
+    DIR *d = opendir(p->cache_dir);
+    struct dirent *de;
+    size_t count = 0;
+    off_t bytes = 0;
+
+    if (d) {
+        while ((de = readdir(d)) != NULL) {
+            size_t len = strlen(de->d_name);
+            if (len > 4 && strcmp(de->d_name + len - 4, ".deb") == 0) {
+                char full[4096];
+                snprintf(full, sizeof full, "%s/%s", p->cache_dir, de->d_name);
+                struct stat st;
+                if (stat(full, &st) == 0) {
+                    bytes += st.st_size;
+                    unlink(full);
+                    count++;
+                }
+            }
+        }
+        closedir(d);
+    }
+    printf("Cleaned %zu package archive(s) (freed %lld bytes).\n", count, (long long)bytes);
+    return 0;
+}
+
+static int cmd_autoclean(paths *p)
+{
+    DIR *d = opendir(p->cache_dir);
+    struct dirent *de;
+    size_t count = 0;
+    off_t bytes = 0;
+    d99_repo *repo = repo_load(p->lists_dir);
+
+    if (d) {
+        while ((de = readdir(d)) != NULL) {
+            size_t len = strlen(de->d_name);
+            if (len > 4 && strcmp(de->d_name + len - 4, ".deb") == 0) {
+                char full[4096];
+                snprintf(full, sizeof full, "%s/%s", p->cache_dir, de->d_name);
+                char *copy = d99_xstrdup(de->d_name);
+                char *u1 = strchr(copy, '_');
+                int obsolete = 0;
+                if (u1) {
+                    *u1 = '\0';
+                    char *pkgname = copy;
+                    char *ver = u1 + 1;
+                    char *u2 = strchr(ver, '_');
+                    if (u2) *u2 = '\0';
+                    d99_cand *c = repo ? repo_find(repo, pkgname, D99_DEP_NONE, NULL) : NULL;
+                    if (!c || d99_vercmp(c->version, ver) > 0)
+                        obsolete = 1;
+                } else {
+                    obsolete = 1;
+                }
+                free(copy);
+                if (obsolete) {
+                    struct stat st;
+                    if (stat(full, &st) == 0) {
+                        bytes += st.st_size;
+                        unlink(full);
+                        count++;
+                    }
+                }
+            }
+        }
+        closedir(d);
+    }
+    if (repo) repo_free(repo);
+    printf("Autoclean removed %zu outdated archive(s) (freed %lld bytes).\n", count, (long long)bytes);
+    return 0;
+}
+
+/* ==================== Extended States & Autoremove ==================== */
+
+static int ext_states_get(const char *path, const char *pkg_name)
+{
+    size_t sz = 0;
+    char *content = d99_read_file(path, &sz);
+    if (!content)
+        return 0;
+    const char *ptr = content;
+    char cur_pkg[128] = "";
+    int is_auto = 0;
+
+    while (ptr && *ptr) {
+        const char *eol = strchr(ptr, '\n');
+        size_t len = eol ? (size_t)(eol - ptr) : strlen(ptr);
+        char *line = d99_xstrndup(ptr, len);
+        char *t = d99_trim(line);
+        if (*t == '\0') {
+            if (strcmp(cur_pkg, pkg_name) == 0) {
+                free(line);
+                free(content);
+                return is_auto;
+            }
+            cur_pkg[0] = '\0';
+            is_auto = 0;
+        } else if (strncasecmp(t, "Package:", 8) == 0) {
+            snprintf(cur_pkg, sizeof cur_pkg, "%s", d99_trim(t + 8));
+        } else if (strncasecmp(t, "Auto-Installed:", 15) == 0) {
+            is_auto = atoi(d99_trim(t + 15));
+        }
+        free(line);
+        ptr = eol ? eol + 1 : NULL;
+    }
+    int res = (strcmp(cur_pkg, pkg_name) == 0) ? is_auto : 0;
+    free(content);
+    return res;
+}
+
+static void ext_states_set(const char *path, const char *pkg_name, const char *arch, int auto_installed)
+{
+    size_t sz = 0;
+    char *content = d99_read_file(path, &sz);
+    d99_strvec out_lines;
+    d99_sv_init(&out_lines);
+    int found = 0;
+    char cur_pkg[128] = "";
+    char cur_arch[64] = "amd64";
+    int cur_auto = 0;
+
+    if (content) {
+        const char *ptr = content;
+        while (ptr && *ptr) {
+            const char *eol = strchr(ptr, '\n');
+            size_t len = eol ? (size_t)(eol - ptr) : strlen(ptr);
+            char *line = d99_xstrndup(ptr, len);
+            char *t = d99_trim(line);
+            if (*t == '\0') {
+                if (cur_pkg[0]) {
+                    if (strcmp(cur_pkg, pkg_name) == 0) {
+                        found = 1;
+                        cur_auto = auto_installed;
+                        if (arch && *arch) snprintf(cur_arch, sizeof cur_arch, "%s", arch);
+                    }
+                    char *b1 = d99_xasprintf("Package: %s", cur_pkg);
+                    char *b2 = d99_xasprintf("Architecture: %s", cur_arch);
+                    char *b3 = d99_xasprintf("Auto-Installed: %d", cur_auto);
+                    d99_sv_push(&out_lines, b1);
+                    d99_sv_push(&out_lines, b2);
+                    d99_sv_push(&out_lines, b3);
+                    d99_sv_push(&out_lines, d99_xstrdup(""));
+                    free(b1); free(b2); free(b3);
+                    cur_pkg[0] = '\0';
+                }
+            } else if (strncasecmp(t, "Package:", 8) == 0) {
+                snprintf(cur_pkg, sizeof cur_pkg, "%s", d99_trim(t + 8));
+            } else if (strncasecmp(t, "Architecture:", 13) == 0) {
+                snprintf(cur_arch, sizeof cur_arch, "%s", d99_trim(t + 13));
+            } else if (strncasecmp(t, "Auto-Installed:", 15) == 0) {
+                cur_auto = atoi(d99_trim(t + 15));
+            }
+            free(line);
+            ptr = eol ? eol + 1 : NULL;
+        }
+        if (cur_pkg[0]) {
+            if (strcmp(cur_pkg, pkg_name) == 0) {
+                found = 1;
+                cur_auto = auto_installed;
+                if (arch && *arch) snprintf(cur_arch, sizeof cur_arch, "%s", arch);
+            }
+            char *b1 = d99_xasprintf("Package: %s", cur_pkg);
+            char *b2 = d99_xasprintf("Architecture: %s", cur_arch);
+            char *b3 = d99_xasprintf("Auto-Installed: %d", cur_auto);
+            d99_sv_push(&out_lines, b1);
+            d99_sv_push(&out_lines, b2);
+            d99_sv_push(&out_lines, b3);
+            d99_sv_push(&out_lines, d99_xstrdup(""));
+            free(b1); free(b2); free(b3);
+        }
+        free(content);
+    }
+    if (!found) {
+        char *b1 = d99_xasprintf("Package: %s", pkg_name);
+        char *b2 = d99_xasprintf("Architecture: %s", (arch && *arch) ? arch : "amd64");
+        char *b3 = d99_xasprintf("Auto-Installed: %d", auto_installed);
+        d99_sv_push(&out_lines, b1);
+        d99_sv_push(&out_lines, b2);
+        d99_sv_push(&out_lines, b3);
+        d99_sv_push(&out_lines, d99_xstrdup(""));
+        free(b1); free(b2); free(b3);
+    }
+    size_t total_len = 0;
+    for (size_t k = 0; k < out_lines.n; k++) total_len += strlen(out_lines.v[k]) + 1;
+    char *out_buf = d99_xmalloc(total_len + 1);
+    out_buf[0] = '\0';
+    for (size_t k = 0; k < out_lines.n; k++) {
+        strcat(out_buf, out_lines.v[k]);
+        strcat(out_buf, "\n");
+    }
+    char *dir = d99_dirname_dup(path);
+    d99_mkdir_p(dir, 0755);
+    free(dir);
+    d99_write_file_atomic(path, out_buf, strlen(out_buf));
+    free(out_buf);
+    d99_sv_free(&out_lines);
+}
+
+static int cmd_autoremove(const char *argv0, paths *p, int yes, int simulate)
+{
+    d99_db *db = d99_db_load_status(p->admindir);
+    if (!db) {
+        fprintf(stderr, "d99-solve: cannot load status from %s\n", p->admindir);
+        return 1;
+    }
+    size_t npkgs = d99_db_count(db);
+    int *needed = calloc(npkgs ? npkgs : 1, sizeof(int));
+    if (!needed) {
+        d99_db_free(db);
+        return 1;
+    }
+
+    /* 1. Mark all installed packages that are manual, essential, or base tools as needed */
+    for (size_t i = 0; i < npkgs; i++) {
+        d99_pkg *pkg = d99_db_at(db, i);
+        if (pkg->state != D99_PS_INSTALLED)
+            continue;
+        int is_auto = ext_states_get(p->ext_states, pkg->name);
+        char *ess = d99_pkg_field_dup(pkg, "Essential");
+        int is_essential = (ess && strcmp(ess, "yes") == 0);
+        free(ess);
+        if (!is_auto || is_essential || (pkg->priority && strcmp(pkg->priority, "required") == 0) ||
+            strncmp(pkg->name, "d99", 3) == 0 || strcmp(pkg->name, "dpkg") == 0 || strcmp(pkg->name, "apt") == 0) {
+            needed[i] = 1;
+        }
+    }
+
+    /* 2. Propagate dependencies */
+    int changed = 1;
+    while (changed) {
+        changed = 0;
+        for (size_t i = 0; i < npkgs; i++) {
+            if (!needed[i]) continue;
+            d99_pkg *pkg = d99_db_at(db, i);
+            if (pkg->state != D99_PS_INSTALLED) continue;
+
+            d99_deplist *dls[2] = { &pkg->predepends, &pkg->depends };
+            for (int di = 0; di < 2; di++) {
+                for (size_t k = 0; k < dls[di]->n; k++) {
+                    d99_depgroup *g = &dls[di]->g[k];
+                    for (size_t j = 0; j < g->n; j++) {
+                        d99_depalternative *alt = &g->alts[j];
+                        d99_pkg *target = d99_db_find(db, alt->name);
+                        if (target && target->state == D99_PS_INSTALLED) {
+                            for (size_t ti = 0; ti < npkgs; ti++) {
+                                if (d99_db_at(db, ti) == target) {
+                                    if (!needed[ti]) {
+                                        needed[ti] = 1;
+                                        changed = 1;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /* 3. Collect orphans */
+    d99_strvec orphans;
+    d99_sv_init(&orphans);
+    for (size_t i = 0; i < npkgs; i++) {
+        d99_pkg *pkg = d99_db_at(db, i);
+        if (pkg->state == D99_PS_INSTALLED && !needed[i]) {
+            int is_auto = ext_states_get(p->ext_states, pkg->name);
+            if (is_auto)
+                d99_sv_push(&orphans, pkg->name);
+        }
+    }
+    free(needed);
+    d99_db_free(db);
+
+    if (orphans.n == 0) {
+        printf("0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.\n");
+        d99_sv_free(&orphans);
+        return 0;
+    }
+
+    printf("The following packages were automatically installed and are no longer required:\n");
+    for (size_t i = 0; i < orphans.n; i++)
+        printf("  %s%s", orphans.v[i], (i + 1) % 4 == 0 || i + 1 == orphans.n ? "\n" : " ");
+
+    printf("The following packages will be REMOVED:\n");
+    for (size_t i = 0; i < orphans.n; i++)
+        printf("  %s%s", orphans.v[i], (i + 1) % 4 == 0 || i + 1 == orphans.n ? "\n" : " ");
+
+    if (simulate) {
+        printf("Simulation finished.\n");
+        d99_sv_free(&orphans);
+        return 0;
+    }
+
+    if (!yes) {
+        printf("Do you want to continue? [Y/n] ");
+        fflush(stdout);
+        char resp[32];
+        if (!fgets(resp, sizeof resp, stdin) || (resp[0] != 'y' && resp[0] != 'Y' && resp[0] != '\n')) {
+            printf("Abort.\n");
+            d99_sv_free(&orphans);
+            return 1;
+        }
+    }
+
+    char *inst = find_inst_tool(argv0);
+    char **av = d99_xmalloc((orphans.n + 8) * sizeof(char *));
+    size_t na = 0;
+    av[na++] = inst;
+    char *ro = NULL;
+    if (strcmp(p->root, "/") != 0) {
+        ro = d99_xasprintf("--root=%s", p->root);
+        av[na++] = ro;
+    }
+    av[na++] = (char *)"-r";
+    for (size_t i = 0; i < orphans.n; i++)
+        av[na++] = orphans.v[i];
+    av[na] = NULL;
+    int rc = run_inst(av);
+    free(av);
+    free(ro);
+    free(inst);
+    d99_sv_free(&orphans);
+    return rc;
+}
+
+/* ==================== Package Marking ==================== */
+
+static int cmd_mark(paths *p, const char **args, size_t nargs)
+{
+    if (nargs == 0) {
+        fprintf(stderr, "Usage: apt-mark <hold|unhold|showhold|auto|manual|showauto|showmanual> [pkg...]\n");
+        return 2;
+    }
+    const char *action = args[0];
+
+    if (strcmp(action, "showhold") == 0) {
+        d99_db *db = d99_db_load_status(p->admindir);
+        if (db) {
+            for (size_t i = 0; i < d99_db_count(db); i++) {
+                d99_pkg *pkg = d99_db_at(db, i);
+                if (pkg->sel == D99_SEL_HOLD)
+                    printf("%s\n", pkg->name);
+            }
+            d99_db_free(db);
+        }
+        return 0;
+    }
+    if (strcmp(action, "showauto") == 0) {
+        size_t sz = 0;
+        char *content = d99_read_file(p->ext_states, &sz);
+        if (content) {
+            const char *ptr = content;
+            char cur_pkg[128] = "";
+            int is_auto = 0;
+            while (ptr && *ptr) {
+                const char *eol = strchr(ptr, '\n');
+                size_t len = eol ? (size_t)(eol - ptr) : strlen(ptr);
+                char *line = d99_xstrndup(ptr, len);
+                char *t = d99_trim(line);
+                if (*t == '\0') {
+                    if (cur_pkg[0] && is_auto)
+                        printf("%s\n", cur_pkg);
+                    cur_pkg[0] = '\0';
+                    is_auto = 0;
+                } else if (strncasecmp(t, "Package:", 8) == 0)
+                    snprintf(cur_pkg, sizeof cur_pkg, "%s", d99_trim(t + 8));
+                else if (strncasecmp(t, "Auto-Installed:", 15) == 0)
+                    is_auto = atoi(d99_trim(t + 15));
+                free(line);
+                ptr = eol ? eol + 1 : NULL;
+            }
+            if (cur_pkg[0] && is_auto)
+                printf("%s\n", cur_pkg);
+            free(content);
+        }
+        return 0;
+    }
+    if (strcmp(action, "showmanual") == 0) {
+        d99_db *db = d99_db_load_status(p->admindir);
+        if (db) {
+            for (size_t i = 0; i < d99_db_count(db); i++) {
+                d99_pkg *pkg = d99_db_at(db, i);
+                if (pkg->state == D99_PS_INSTALLED && !ext_states_get(p->ext_states, pkg->name))
+                    printf("%s\n", pkg->name);
+            }
+            d99_db_free(db);
+        }
+        return 0;
+    }
+    if (nargs < 2) {
+        fprintf(stderr, "apt-mark %s needs at least one package argument\n", action);
+        return 2;
+    }
+
+    if (strcmp(action, "hold") == 0 || strcmp(action, "unhold") == 0) {
+        d99_db *db = d99_db_load_status(p->admindir);
+        if (!db) {
+            fprintf(stderr, "d99-solve: cannot load status database\n");
+            return 1;
+        }
+        int hold = (strcmp(action, "hold") == 0);
+        for (size_t i = 1; i < nargs; i++) {
+            d99_pkg *pkg = d99_db_find(db, args[i]);
+            if (pkg) {
+                d99_pkg_set_status(db, pkg, hold ? D99_SEL_HOLD : D99_SEL_INSTALL, pkg->state, pkg->flags);
+                printf("%s set on %s.\n", args[i], hold ? "hold" : "unhold");
+            } else {
+                fprintf(stderr, "d99-solve: package '%s' is not installed\n", args[i]);
+            }
+        }
+        d99_db_save_status(db, p->admindir);
+        d99_db_free(db);
+        return 0;
+    }
+
+    if (strcmp(action, "auto") == 0 || strcmp(action, "manual") == 0) {
+        int is_auto = (strcmp(action, "auto") == 0);
+        for (size_t i = 1; i < nargs; i++) {
+            ext_states_set(p->ext_states, args[i], "amd64", is_auto);
+            printf("%s set to %s installed.\n", args[i], is_auto ? "automatically" : "manually");
+        }
+        return 0;
+    }
+
+    fprintf(stderr, "apt-mark: unrecognized action '%s'\n", action);
+    return 2;
+}
+
+/* ==================== History, Backups, & Rollback ==================== */
+
+static void log_history(const char *log_path, const char *cmdline,
+                        action *acts, size_t nacts, int is_start)
+{
+    char *dir = d99_dirname_dup(log_path);
+    d99_mkdir_p(dir, 0755);
+    free(dir);
+    FILE *f = fopen(log_path, "a");
+    if (!f) return;
+    time_t t = time(NULL);
+    struct tm tm;
+    localtime_r(&t, &tm);
+    char timebuf[64];
+    strftime(timebuf, sizeof timebuf, "%Y-%m-%d  %H:%M:%S", &tm);
+    if (is_start) {
+        fprintf(f, "\nStart-Date: %s\n", timebuf);
+        fprintf(f, "Commandline: %s\n", cmdline ? cmdline : "d99-solve");
+        for (size_t i = 0; i < nacts; i++) {
+            if (acts[i].old_version)
+                fprintf(f, "Upgrade: %s:%s (%s, %s)\n", acts[i].name, acts[i].arch, acts[i].old_version, acts[i].version);
+            else
+                fprintf(f, "Install: %s:%s (%s)\n", acts[i].name, acts[i].arch, acts[i].version);
+        }
+    } else {
+        fprintf(f, "End-Date: %s\n", timebuf);
+    }
+    fclose(f);
+}
+
+static void enforce_backup_retention(const char *pkg_bdir)
+{
+    DIR *d = opendir(pkg_bdir);
+    if (!d) return;
+    struct dirent *de;
+    struct {
+        char path[4096];
+        time_t mtime;
+        off_t size;
+    } list[64];
+    size_t count = 0;
+    off_t max_size = 0;
+
+    while ((de = readdir(d)) != NULL) {
+        if (de->d_name[0] == '.') continue;
+        size_t nl = strlen(de->d_name);
+        if (nl > 4 && strcmp(de->d_name + nl - 4, ".deb") == 0) {
+            char full[4096];
+            snprintf(full, sizeof full, "%s/%s", pkg_bdir, de->d_name);
+            struct stat st;
+            if (stat(full, &st) == 0 && count < 64) {
+                snprintf(list[count].path, sizeof list[count].path, "%s", full);
+                list[count].mtime = st.st_mtime;
+                list[count].size = st.st_size;
+                if (st.st_size > max_size) max_size = st.st_size;
+                count++;
+            }
+        }
+    }
+    closedir(d);
+
+    /* Retention policy:
+     * If package size < 500 MB: keep up to 3 backups.
+     * If >= 500 MB: keep only 1 backup. */
+    size_t max_keep = (max_size >= 500LL * 1024 * 1024) ? 1 : 3;
+    if (count > max_keep) {
+        for (size_t i = 0; i < count; i++) {
+            for (size_t j = i + 1; j < count; j++) {
+                if (list[j].mtime < list[i].mtime) {
+                    char tp[4096];
+                    time_t tm = list[i].mtime;
+                    off_t ts = list[i].size;
+                    strcpy(tp, list[i].path);
+                    list[i] = list[j];
+                    strcpy(list[j].path, tp);
+                    list[j].mtime = tm;
+                    list[j].size = ts;
+                }
+            }
+        }
+        size_t to_delete = count - max_keep;
+        for (size_t i = 0; i < to_delete; i++) {
+            unlink(list[i].path);
+        }
+    }
+}
+
+static void backup_old_package(paths *p, const char *pkg_name, const char *old_ver)
+{
+    if (!old_ver || !*old_ver) return;
+    char *pkg_bdir = d99_xasprintf("%s/%s", p->backups_dir, pkg_name);
+    d99_mkdir_p(pkg_bdir, 0755);
+
+    const char *dirs[2];
+    dirs[0] = p->cache_dir;
+    dirs[1] = "/var/cache/apt/archives";
+    int backed_up = 0;
+    for (int di = 0; di < 2 && !backed_up; di++) {
+        DIR *d = opendir(dirs[di]);
+        if (!d) continue;
+        struct dirent *de;
+        while ((de = readdir(d)) != NULL) {
+            if (strncmp(de->d_name, pkg_name, strlen(pkg_name)) == 0 &&
+                strstr(de->d_name, old_ver) &&
+                strstr(de->d_name, ".deb")) {
+                char src[4096], dst[4096];
+                snprintf(src, sizeof src, "%s/%s", dirs[di], de->d_name);
+                snprintf(dst, sizeof dst, "%s/%s", pkg_bdir, de->d_name);
+                int sfd = open(src, O_RDONLY);
+                if (sfd >= 0) {
+                    int dfd = open(dst, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                    if (dfd >= 0) {
+                        char buf[65536];
+                        ssize_t r;
+                        while ((r = read(sfd, buf, sizeof buf)) > 0) {
+                            if (write(dfd, buf, (size_t)r) != r) { /* ignore */ }
+                        }
+                        close(dfd);
+                        backed_up = 1;
+                    }
+                    close(sfd);
+                }
+                break;
+            }
+        }
+        closedir(d);
+    }
+    enforce_backup_retention(pkg_bdir);
+    free(pkg_bdir);
+}
+
+static int cmd_rollback(const char *argv0, paths *p, const char *pkg_name)
+{
+    char *pkg_bdir = d99_xasprintf("%s/%s", p->backups_dir, pkg_name);
+    DIR *d = opendir(pkg_bdir);
+    if (!d) {
+        fprintf(stderr, "d99-solve: no backups found for package '%s'\n", pkg_name);
+        free(pkg_bdir);
+        return 1;
+    }
+    struct dirent *de;
+    char newest_deb[4096] = "";
+    time_t newest_time = 0;
+
+    while ((de = readdir(d)) != NULL) {
+        size_t nl = strlen(de->d_name);
+        if (nl > 4 && strcmp(de->d_name + nl - 4, ".deb") == 0) {
+            char full[4096];
+            snprintf(full, sizeof full, "%s/%s", pkg_bdir, de->d_name);
+            struct stat st;
+            if (stat(full, &st) == 0) {
+                if (st.st_mtime >= newest_time) {
+                    newest_time = st.st_mtime;
+                    snprintf(newest_deb, sizeof newest_deb, "%s", full);
+                }
+            }
+        }
+    }
+    closedir(d);
+    free(pkg_bdir);
+
+    if (!newest_deb[0]) {
+        fprintf(stderr, "d99-solve: no backup archives found for package '%s'\n", pkg_name);
+        return 1;
+    }
+
+    printf("Rolling back %s using backup archive %s ...\n", pkg_name, newest_deb);
+    char *inst = find_inst_tool(argv0);
+    char **av = d99_xmalloc(8 * sizeof(char *));
+    size_t na = 0;
+    av[na++] = inst;
+    char *ro = NULL;
+    if (strcmp(p->root, "/") != 0) {
+        ro = d99_xasprintf("--root=%s", p->root);
+        av[na++] = ro;
+    }
+    av[na++] = (char *)"-i";
+    av[na++] = newest_deb;
+    av[na] = NULL;
+    int rc = run_inst(av);
+    free(av);
+    free(ro);
+    free(inst);
+    if (rc == 0)
+        printf("Rollback of %s completed successfully.\n", pkg_name);
+    return rc;
+}
+
+static int cmd_history(paths *p)
+{
+    size_t sz = 0;
+    char *content = d99_read_file(p->log_file, &sz);
+    if (!content) {
+        printf("No transaction history available.\n");
+        return 0;
+    }
+    fputs(content, stdout);
+    free(content);
     return 0;
 }
 
@@ -1571,6 +2402,12 @@ static void usage(const char *cmd_name)
 "  install <pkg>[=<ver>]...     SAT-solve, download and install\n"
 "  remove <pkg>...              remove packages (via d99-inst)\n"
 "  purge <pkg>...               purge packages (via d99-inst)\n"
+"  autoremove                   remove orphaned auto-installed packages\n"
+"  clean                        erase downloaded archive files\n"
+"  autoclean                    erase outdated downloaded archive files\n"
+"  mark <action> <pkg>...       manage hold/unhold/auto/manual package states\n"
+"  history                      view package transaction log\n"
+"  rollback <pkg>               rollback package to previous backup\n"
 "  search <term>                search names and descriptions\n"
 "  show <pkg>                   show index details\n"
 "\n"
@@ -1586,12 +2423,13 @@ static void usage(const char *cmd_name)
 
 int main(int argc, char **argv)
 {
-    const char *cmd_name = d99_cmd_name(argv[0], "d99-solve", "apt");
+    int is_apt_mark = (strstr(argv[0], "apt-mark") != NULL);
+    const char *cmd_name = is_apt_mark ? "apt-mark" : d99_cmd_name(argv[0], "d99-solve", "apt");
     paths p;
     const char *root = "/";
     const char *arch = NULL;
     int yes = 0, download_only = 0, print_uris = 0, simulate = 0, fix_broken = 0;
-    const char *cmd = NULL;
+    const char *cmd = is_apt_mark ? "mark" : NULL;
     d99_strvec ops;
     int i, rc;
 
@@ -1635,6 +2473,10 @@ int main(int argc, char **argv)
                     printf("d99-solve (d99) %s\n", D99_VERSION);
                     return 0;
                 } else if (strcmp(a, "--help") == 0) {
+                    if (is_apt_mark) {
+                        fprintf(stderr, "Usage: apt-mark <hold|unhold|showhold|auto|manual|showauto|showmanual> [pkg...]\n");
+                        return 0;
+                    }
                     usage(cmd_name);
                     return 0;
                 } else {
@@ -1661,6 +2503,13 @@ int main(int argc, char **argv)
         }
     }
 
+    if (!cmd && ops.n > 0) {
+        cmd = ops.v[0];
+        /* shift ops */
+        for (i = 0; (size_t)i + 1 < ops.n; i++)
+            ops.v[i] = ops.v[i + 1];
+        ops.n--;
+    }
     if (!cmd) {
         usage(cmd_name);
         return 2;
@@ -1735,6 +2584,23 @@ int main(int argc, char **argv)
             rc = cmd_remove_purge(argv[0], &p, ops.v, (int)ops.n,
                                   strcmp(cmd, "purge") == 0 || strcmp(cmd, "p") == 0);
         }
+    } else if (strcmp(cmd, "autoremove") == 0 || strcmp(cmd, "auto-remove") == 0) {
+        rc = cmd_autoremove(argv[0], &p, yes, simulate);
+    } else if (strcmp(cmd, "clean") == 0) {
+        rc = cmd_clean(&p);
+    } else if (strcmp(cmd, "autoclean") == 0 || strcmp(cmd, "auto-clean") == 0) {
+        rc = cmd_autoclean(&p);
+    } else if (strcmp(cmd, "mark") == 0) {
+        rc = cmd_mark(&p, (const char **)ops.v, ops.n);
+    } else if (strcmp(cmd, "history") == 0) {
+        rc = cmd_history(&p);
+    } else if (strcmp(cmd, "rollback") == 0) {
+        if (ops.n == 0) {
+            fprintf(stderr, "d99-solve: rollback needs a package name\n");
+            rc = 2;
+        } else {
+            rc = cmd_rollback(argv[0], &p, ops.v[0]);
+        }
     } else if (strcmp(cmd, "search") == 0 || strcmp(cmd, "s") == 0) {
         if (ops.n == 0) {
             fprintf(stderr, "d99-solve: search needs a term\n");
@@ -1755,11 +2621,6 @@ int main(int argc, char **argv)
     }
 
     d99_sv_free(&ops);
-    free(p.root);
-    free(p.lists_dir);
-    free(p.cache_dir);
-    free(p.sources_file);
-    free(p.sources_dir);
-    free(p.admindir);
+    paths_free(&p);
     return rc;
 }

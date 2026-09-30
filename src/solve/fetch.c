@@ -1,6 +1,7 @@
 #include "solve.h"
 
 #include <arpa/inet.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -15,6 +16,59 @@
 #include <unistd.h>
 
 #define FETCH_MAX_REDIRECTS 8
+
+typedef void CURL;
+typedef int CURLcode;
+typedef size_t (*curl_write_cb)(char *ptr, size_t size, size_t nmemb, void *userdata);
+
+typedef CURL *(*fn_curl_easy_init)(void);
+typedef CURLcode (*fn_curl_easy_setopt)(CURL *, int, ...);
+typedef CURLcode (*fn_curl_easy_perform)(CURL *);
+typedef void (*fn_curl_easy_cleanup)(CURL *);
+typedef void (*fn_curl_easy_reset)(CURL *);
+typedef CURLcode (*fn_curl_easy_getinfo)(CURL *, int, ...);
+
+static void *g_curl_lib = NULL;
+static int g_curl_loaded = 0;
+static fn_curl_easy_init g_curl_easy_init = NULL;
+static fn_curl_easy_setopt g_curl_easy_setopt = NULL;
+static fn_curl_easy_perform g_curl_easy_perform = NULL;
+static fn_curl_easy_cleanup g_curl_easy_cleanup = NULL;
+static fn_curl_easy_reset g_curl_easy_reset = NULL;
+static fn_curl_easy_getinfo g_curl_easy_getinfo = NULL;
+static CURL *g_curl_session = NULL;
+
+static void init_libcurl(void)
+{
+    if (g_curl_loaded)
+        return;
+    g_curl_loaded = 1;
+    g_curl_lib = dlopen("libcurl.so.4", RTLD_LAZY);
+    if (!g_curl_lib)
+        g_curl_lib = dlopen("libcurl.so.3", RTLD_LAZY);
+    if (!g_curl_lib)
+        g_curl_lib = dlopen("libcurl.so", RTLD_LAZY);
+    if (!g_curl_lib)
+        return;
+
+    *(void **)(&g_curl_easy_init) = dlsym(g_curl_lib, "curl_easy_init");
+    *(void **)(&g_curl_easy_setopt) = dlsym(g_curl_lib, "curl_easy_setopt");
+    *(void **)(&g_curl_easy_perform) = dlsym(g_curl_lib, "curl_easy_perform");
+    *(void **)(&g_curl_easy_cleanup) = dlsym(g_curl_lib, "curl_easy_cleanup");
+    *(void **)(&g_curl_easy_reset) = dlsym(g_curl_lib, "curl_easy_reset");
+    *(void **)(&g_curl_easy_getinfo) = dlsym(g_curl_lib, "curl_easy_getinfo");
+
+    if (!g_curl_easy_init || !g_curl_easy_setopt || !g_curl_easy_perform ||
+        !g_curl_easy_getinfo) {
+        dlclose(g_curl_lib);
+        g_curl_lib = NULL;
+    }
+}
+
+static size_t curl_file_write(char *ptr, size_t size, size_t nmemb, void *userdata)
+{
+    return fwrite(ptr, size, nmemb, (FILE *)userdata);
+}
 
 static int copy_file(const char *src, const char *dest)
 {
@@ -335,6 +389,76 @@ static int http_get(const char *url, const char *dest, int depth, int quiet)
 
 static int fetch_https(const char *url, const char *dest, int quiet)
 {
+    init_libcurl();
+    if (g_curl_lib) {
+        char tmpl[4096];
+        char *dir = d99_dirname_dup(dest);
+        int fd;
+        FILE *fp;
+        struct stat st;
+        int has_dest = (stat(dest, &st) == 0 && st.st_size > 0);
+        long http_code = 0;
+        CURLcode res;
+
+        snprintf(tmpl, sizeof tmpl, "%s/.d99fetch.XXXXXX", dir ? dir : ".");
+        free(dir);
+        fd = mkstemp(tmpl);
+        if (fd < 0)
+            return -1;
+        fchmod(fd, 0644);
+        fp = fdopen(fd, "wb");
+        if (!fp) {
+            close(fd);
+            unlink(tmpl);
+            return -1;
+        }
+
+        if (!g_curl_session)
+            g_curl_session = g_curl_easy_init();
+        else if (g_curl_easy_reset)
+            g_curl_easy_reset(g_curl_session);
+
+        if (!g_curl_session) {
+            fclose(fp);
+            unlink(tmpl);
+            return -1;
+        }
+
+        g_curl_easy_setopt(g_curl_session, 10002, url);              /* CURLOPT_URL */
+        g_curl_easy_setopt(g_curl_session, 20011, curl_file_write);  /* CURLOPT_WRITEFUNCTION */
+        g_curl_easy_setopt(g_curl_session, 10001, fp);               /* CURLOPT_WRITEDATA */
+        g_curl_easy_setopt(g_curl_session, 52, 1L);                  /* CURLOPT_FOLLOWLOCATION */
+        g_curl_easy_setopt(g_curl_session, 45, 1L);                  /* CURLOPT_FAILONERROR */
+        g_curl_easy_setopt(g_curl_session, 99, 1L);                  /* CURLOPT_NOSIGNAL */
+        g_curl_easy_setopt(g_curl_session, 10018, "d99/0.2.0");      /* CURLOPT_USERAGENT */
+
+        if (has_dest) {
+            g_curl_easy_setopt(g_curl_session, 33, 1L);              /* CURLOPT_TIMECONDITION = TIMECOND_IFMODSINCE */
+            g_curl_easy_setopt(g_curl_session, 34, (long)st.st_mtime); /* CURLOPT_TIMEVALUE */
+        }
+
+        res = g_curl_easy_perform(g_curl_session);
+        g_curl_easy_getinfo(g_curl_session, 0x200000 + 2, &http_code); /* CURLINFO_RESPONSE_CODE */
+        fclose(fp);
+
+        if (res == 0 && http_code == 304) {
+            unlink(tmpl);
+            return 1; /* Not modified (cache hit) */
+        }
+        if (res != 0 || (http_code != 200 && http_code != 0)) {
+            unlink(tmpl);
+            if (!quiet)
+                fprintf(stderr, "d99-solve: HTTP transfer failed for %s (code %ld)\n", url, http_code);
+            return -1;
+        }
+
+        if (rename(tmpl, dest) != 0) {
+            unlink(tmpl);
+            return -1;
+        }
+        return 0;
+    }
+
     char tmpl[4096];
     char *dir = d99_dirname_dup(dest);
     int fd;
@@ -407,6 +531,11 @@ int d99_fetch(const char *url, const char *dest, int quiet)
             return -1;
         }
         return 0;
+    }
+    init_libcurl();
+    if (g_curl_lib) {
+        if (strncmp(url, "http://", 7) == 0 || strncmp(url, "https://", 8) == 0)
+            return fetch_https(url, dest, quiet);
     }
     if (strncmp(url, "http://", 7) == 0)
         return http_get(url, dest, 0, quiet);

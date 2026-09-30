@@ -89,7 +89,8 @@ static int is_standard_tool_path(const char *abuf, const char **canonical_tool)
         strcmp(p, "dpkg-deb") == 0 ||
         strcmp(p, "dpkg-query") == 0 ||
         strcmp(p, "apt") == 0 ||
-        strcmp(p, "apt-get") == 0) {
+        strcmp(p, "apt-get") == 0 ||
+        strcmp(p, "apt-mark") == 0) {
         if (canonical_tool)
             *canonical_tool = p;
         return 1;
@@ -108,6 +109,7 @@ static void ensure_tool_symlinks(const char *root)
         { "usr/bin/dpkg-query", "d99-query" },
         { "usr/bin/apt", "d99-solve" },
         { "usr/bin/apt-get", "d99-solve" },
+        { "usr/bin/apt-mark", "d99-solve" },
         { NULL, NULL }
     };
     int i;

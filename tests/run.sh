@@ -153,8 +153,33 @@ check "dependency hello-d99 pulled in" sh -c \
 check "metapackage installed" sh -c \
     "\"${BIN}/d99-query\" --admindir \"${R}/var/lib/dpkg\" -W hello-meta | grep -q '0.5'"
 
-check "solve remove" "${BIN}/d99-solve" --root="${R}" -y remove hello-meta
-check "solve purge" "${BIN}/d99-solve" --root="${R}" -y purge hello-d99 libhello
+check "extended_states recorded auto-install for dependencies" sh -c \
+    "grep -A2 'Package: hello-d99' '${R}/var/lib/apt/extended_states' | grep -q 'Auto-Installed: 1'"
+check "extended_states recorded manual-install for target" sh -c \
+    "grep -A2 'Package: hello-meta' '${R}/var/lib/apt/extended_states' | grep -q 'Auto-Installed: 0'"
+check "history log recorded install transaction" sh -c \
+    "grep -q 'Install: hello-meta' '${R}/var/log/d99/history.log'"
+ln -sf d99-solve "${BIN}/apt-mark"
+check "apt-mark showauto shows dependencies" sh -c \
+    "\"${BIN}/apt-mark\" --root=\"${R}\" showauto | grep -q hello-d99"
+check "apt-mark hold works" "${BIN}/apt-mark" --root="${R}" hold hello-meta
+check "apt-mark showhold shows hold" sh -c \
+    "\"${BIN}/apt-mark\" --root=\"${R}\" showhold | grep -q hello-meta"
+check "apt-mark unhold works" "${BIN}/apt-mark" --root="${R}" unhold hello-meta
+
+check "solve remove hello-meta" "${BIN}/d99-solve" --root="${R}" -y remove hello-meta
+check "autoremove removes orphaned hello-d99 and libhello" "${BIN}/d99-solve" --root="${R}" -y autoremove
+check "orphans deinstalled" sh -c \
+    "grep -A2 'Package: hello-d99' '${R}/var/lib/dpkg/status' | grep -q 'Status: deinstall ok config-files'"
+
+check "solve clean clears cache" "${BIN}/d99-solve" --root="${R}" clean
+check "solve autoclean runs" "${BIN}/d99-solve" --root="${R}" autoclean
+
+mkdir -p "${R}/var/backups/d99/libhello"
+cp "${M}/libhello_2.0-1_all.deb" "${R}/var/backups/d99/libhello/"
+check "solve rollback restores package" "${BIN}/d99-solve" --root="${R}" rollback libhello
+check "package installed after rollback" sh -c \
+    "\"${BIN}/d99-query\" --admindir \"${R}/var/lib/dpkg\" -W libhello | grep -q '2.0-1'"
 
 # ------------------------------------------------------- dpkg-divert interop
 # A registered local diversion (as written by `dpkg-divert --local`)
